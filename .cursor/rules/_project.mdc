@@ -7,95 +7,104 @@ alwaysApply: true
 
 ## 1. Project Overview
 
-goal: CLI tool to wrap long-running processes, monitor files for changes, and segment logs based on file events or IPC requests.
+goal: CLI tool to wrap long-running processes, segment their logs, and send input to them, all managed via IPC. It also aims to monitor files for changes to trigger log chopping (future feature).
 type: CLI Tool
 key features:
-- Wraps and runs any user-specified command (now direct passthrough, no subcommand)
-- Monitors a specified file or directory for changes (add, change, unlink)
-- Captures stdout and stderr from the wrapped process
-- Segments/chops logs into new files in a specified log directory on file change or IPC request
-- Graceful shutdown and bulletproof process tree cleanup
-- IPC server for on-demand log chopping via meta file
+- Wraps and runs any user-specified command using the `run` subcommand (default).
+- Captures stdout and stderr from the wrapped process.
+- Segments/chops logs into new files in a specified log directory on IPC request (`request-logs` command).
+- Allows sending input strings to the stdin of the wrapped process via IPC (`send-input` command).
+- Graceful shutdown using `tree-kill` for robust process tree cleanup.
+- IPC server (using Node.js `net` module via Unix domain sockets) for on-demand log chopping and input sending.
+- (Planned) Monitors a specified file or directory for changes (add, change, unlink) to trigger log chopping.
 
 ## 2. Technology Stack
 
-language(s): TypeScript ^5.8.3
+language(s): TypeScript ^5.8.3 (target: es2016, module: commonjs, strict: true)
 framework(s): None (CLI, not web)
 ui library/styling: N/A
 database(s): N/A
 state management: N/A
-api layer: N/A
+api layer: N/A (IPC via Node.js `net` module)
 key libraries:
 - commander (CLI parsing)
-- chokidar (file watching)
-- tree-kill (process tree cleanup)
-- vitest (testing)
-- tsx (dev execution)
-- @biomejs/biome (format/lint)
+- chokidar (File watching - planned for future use)
+- tree-kill (Process tree cleanup)
+- vitest (Testing)
+- tsx (Development execution of TypeScript)
+- @biomejs/biome (Formatting and linting)
 
 ## 3. Project Structure
 
 main source directory: src/
 core directories:
 - src/: Main TypeScript source (index.ts)
-- dist/: Compiled output
-- test/: Integration tests (Vitest)
-- tmp/: Test-specific files, test apps, logs
+- dist/: Compiled JavaScript output
+- test/integration/: Integration tests (Vitest)
+- tmp/: Temporary files generated during tests (e.g., test scripts, logs)
+- docs/tasks/: Task breakdown files
 diagram/link: N/A
 
 ## 4. Coding Standards & Conventions
 
-language usage: Strict TypeScript, async/await, avoid any, use node: imports
+language usage: Strict TypeScript (strict mode enabled in tsconfig), async/await, use `node:` prefixed imports for built-in modules. Avoid `any` where possible. Consider optional chaining (`?.`) for cleaner property access on potentially null/undefined objects.
 naming conventions:
-- files/folders: kebab-case
-- variables/functions: camelCase
-- types/interfaces: PascalCase
-code style/formatting: @biomejs/biome (see package.json scripts)
-comments: English, JSDoc for types, TODO for pending work
-imports: Grouped (stdlib, external, internal)
+- files/folders: kebab-case (e.g., `src/my-module.ts`, `docs/tasks/`)
+- variables/functions: camelCase (e.g., `myVariable`, `calculateValue`)
+- types/interfaces: PascalCase (e.g., `LogBufferEntry`, `IpcOptions`)
+code style/formatting: @biomejs/biome (configured via `biome.json` if present, or CLI arguments in `package.json` scripts). Use `pnpm format`.
+comments: English. JSDoc for public APIs and complex types/functions. Use `TODO:` for pending work.
+imports: Grouped (Node.js built-in, external/npm packages, internal project modules).
 
 ## 5. Key Principles & Best Practices
 
-- Observability: Log all key events (file changes, log chopping, process start/exit, IPC)
-- Robustness: Handle errors gracefully, validate paths, clean up all processes
-- User Experience: Clear CLI options, helpful errors, predictable behavior
-- Modularity: CLI subcommands for separation of concerns
-- Bulletproof process cleanup: Use tree-kill for all child/grandchild processes
+- Observability: Log all key events (IPC requests/responses, process start/exit, errors, input sending, log chopping).
+- Robustness: Handle errors gracefully (e.g., IPC connection issues, file system errors), validate paths and inputs, ensure bulletproof process cleanup.
+- User Experience: Clear CLI subcommands (`run`, `request-logs`, `send-input`) and options, helpful error messages, predictable behavior.
+- Modularity: CLI subcommands provide separation of concerns. Core logic in `mainAction`.
+- Bulletproof process cleanup: Mandate `tree-kill` for all child/grandchild processes spawned by the wrapped command, both in the CLI tool and in tests for teardown.
 
 ## 6. Testing
 
 framework: Vitest
-types: Integration tests for CLI, IPC, and log chopping
-location: test/integration/
-notes: Tests must use passthrough CLI (no subcommand) and verify meta file, log chopping, and process cleanup. Use tree-kill for teardown.
+types: Integration tests for CLI subcommands (`run`, `request-logs`, `send-input`), IPC communication, log chopping, input sending, and process lifecycle management.
+location: `test/integration/`
+notes: Tests should verify command execution, IPC interactions (including success and error cases), log file creation and content, and ensure proper cleanup of all processes and temporary files (e.g., IPC sockets).
 
 ## 7. Tooling & Workflow
 
-package manager: pnpm
-build command(s): pnpm build
+package manager: pnpm (version specified in `package.json`'s `packageManager` field, e.g., pnpm@10.10.0)
+build command(s): `pnpm build` (runs `tsc`)
 run command(s):
-  - pnpm dev -- <command_to_wrap...>
-  - pnpm start -- <command_to_wrap...>
-  - node dist/index.js -- <command_to_wrap...>
-  - pnpm dev request-logs --meta-file <meta.json>
-version control: Git
-ci/cd: N/A
+  - Main application (wrapping a command):
+    - `pnpm dev -- run -- <command_to_wrap...>` (development with tsx)
+    - `pnpm start -- run -- <command_to_wrap...>` (production with node)
+    - `node dist/index.js run -- <command_to_wrap...>` (production direct)
+    - `chopup run -- <command_to_wrap...>` (if globally installed or via npx)
+  - Requesting logs:
+    - `pnpm dev -- request-logs --socket <socket-path>`
+    - `chopup request-logs --socket <socket-path>`
+  - Sending input:
+    - `pnpm dev -- send-input --socket <socket-path> --input "<string>"`
+    - `chopup send-input --socket <socket-path> --input "<string>"`
+version control: Git. Recommended commit message convention: Conventional Commits (e.g., `feat:`, `fix:`, `docs:`, `chore:`).
+ci/cd: N/A (as of now)
 
 ## 8. (Optional) Database / API Guidelines
 
-N/A
+N/A (No database or traditional web API)
 
 ## 9. (Optional) Specific Feature Rules
 
-- Log Chopping: Logs are chopped on file events or IPC request. Each chop includes logs since last chop time. Final chop on process exit.
-- File Watching: Chokidar monitors add/change/unlink events.
-- IPC: Meta file written with PID and port. request-logs subcommand connects to IPC server for on-demand log chopping.
-- CLI: All main options must follow root command. No subcommand required for passthrough.
-- Process Cleanup: tree-kill is used in both CLI and tests to ensure all spawned processes are killed on shutdown or test teardown.
+- Log Chopping: Logs are chopped on `request-logs` IPC command. Each chop includes logs since the last chop time. A final chop occurs on graceful process exit.
+- Input Sending: Input is sent to the wrapped process's stdin via the `send-input` IPC command. The command takes the target IPC socket and the input string.
+- IPC: Communication between `chopup` instances (main `run` and client commands like `request-logs`, `send-input`) happens over a Unix domain socket. The `run` command prints its socket path on startup.
+- CLI Structure: The tool uses subcommands (`run`, `request-logs`, `send-input`). `run` is the default command.
+- Process Cleanup: `tree-kill` is critical. It's used in the main `run` command's shutdown logic and should be used in test teardowns to ensure no orphaned processes.
 
 ## 10. (Optional) Rule Referencing
 
-- See [always-global.mdc](mdc:.cursor/rules/always-global.mdc) for global principles.
+- See [always-global.mdc](mdc:.cursor/rules/always-global.mdc) for overarching global development principles.
 
 ---
 

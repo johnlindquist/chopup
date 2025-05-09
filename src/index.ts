@@ -126,26 +126,28 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
                 const inputToSend = message.substring('SEND_INPUT_REQUEST '.length);
                 // Log the event: input, timestamp, wrapper PID
                 console.log(`[WRAPPER_INPUT_SENT] Timestamp: ${new Date().toISOString()}, PID: ${process.pid}, Input: "${inputToSend}"`);
-                console.log(`[IPC_SERVER] Processing SEND_INPUT_REQUEST with input: "${inputToSend}"`);
-                if (childProcess && childProcess.stdin && !childProcess.stdin.destroyed) {
-                    try {
-                        childProcess.stdin.write(inputToSend);
-                        console.log('[IPC_SERVER] Sent input to child process stdin.');
-                        socket.write('INPUT_SENT');
-                    } catch (error) {
-                        console.error('[IPC_SERVER_ERROR] Failed to write to child process stdin:', error);
-                        socket.write('ERROR_SENDING_INPUT');
+                console.log(`[IPC_SERVER] Processing SEND_INPUT_REQUEST with input: \"${inputToSend}\"`);
+                if (childProcess?.stdin && !childProcess.stdin.destroyed) {
+                    console.log(`[IPC_SERVER] Processing SEND_INPUT_REQUEST with input: "${inputToSend}"`);
+                    if (childProcess && childProcess.stdin && !childProcess.stdin.destroyed) {
+                        try {
+                            childProcess.stdin.write(inputToSend);
+                            console.log('[IPC_SERVER] Sent input to child process stdin.');
+                            socket.write('INPUT_SENT');
+                        } catch (error) {
+                            console.error('[IPC_SERVER_ERROR] Failed to write to child process stdin:', error);
+                            socket.write('ERROR_SENDING_INPUT');
+                        }
+                    } else {
+                        console.warn('[IPC_SERVER] Cannot send input: child process or stdin not available.');
+                        socket.write('ERROR_CHILD_PROCESS_NOT_AVAILABLE');
                     }
                 } else {
-                    console.warn('[IPC_SERVER] Cannot send input: child process or stdin not available.');
-                    socket.write('ERROR_CHILD_PROCESS_NOT_AVAILABLE');
+                    console.log('[IPC_SERVER] Unknown message:', message);
+                    socket.write('ERROR_UNKNOWN_MESSAGE');
                 }
-            } else {
-                console.log('[IPC_SERVER] Unknown message:', message);
-                socket.write('ERROR_UNKNOWN_MESSAGE');
-            }
-            socket.end();
-        });
+                socket.end();
+            });
         socket.on('error', (err) => {
             console.error('[IPC_SERVER] Socket error:', err);
         });
