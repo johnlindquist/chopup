@@ -28,6 +28,7 @@ interface LogBufferEntry {
 const logBuffer: LogBufferEntry[] = [];
 let lastChopTime = Date.now();
 let ipcServer: net.Server | null = null;
+let childProcess: ReturnType<typeof spawn> | null = null; // Keep a reference to childProcess
 
 function sanitizeForFolder(name: string): string {
     return name.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
@@ -121,6 +122,22 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
                     socket.write('NO_NEW_LOGS');
                     console.log('[IPC_SERVER] Sent NO_NEW_LOGS to client.');
                 }
+            } else if (message.startsWith('SEND_INPUT_REQUEST ')) {
+                const inputToSend = message.substring('SEND_INPUT_REQUEST '.length);
+                console.log(`[IPC_SERVER] Processing SEND_INPUT_REQUEST with input: "${inputToSend}"`);
+                if (childProcess && childProcess.stdin && !childProcess.stdin.destroyed) {
+                    try {
+                        childProcess.stdin.write(inputToSend);
+                        console.log('[IPC_SERVER] Sent input to child process stdin.');
+                        socket.write('INPUT_SENT');
+                    } catch (error) {
+                        console.error('[IPC_SERVER_ERROR] Failed to write to child process stdin:', error);
+                        socket.write('ERROR_SENDING_INPUT');
+                    }
+                } else {
+                    console.warn('[IPC_SERVER] Cannot send input: child process or stdin not available.');
+                    socket.write('ERROR_CHILD_PROCESS_NOT_AVAILABLE');
+                }
             } else {
                 console.log('[IPC_SERVER] Unknown message:', message);
                 socket.write('ERROR_UNKNOWN_MESSAGE');
@@ -151,34 +168,46 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
 
     // 3. Spawn the commandToRun
     console.log(`[DEBUG] Spawning child process: ${command} ${args.join(' ')}`);
-    const childProcess = spawn(command, args, {
-        stdio: ['inherit', 'pipe', 'pipe'],
+    const cp = spawn(command, args, { // Assign to local, then to module
+        stdio: ['pipe', 'pipe', 'pipe'],
         cwd: process.cwd()
     });
+    childProcess = cp; // Assign to module-level variable
 
     // 4. Pipe stdout/stderr from child process to logBuffer
-    childProcess.stdout.on('data', (data) => {
-        const lines = data.toString().split('\n').filter((line: string) => line.length > 0);
-        for (const line of lines) {
-            console.log(`[CHILD_STDOUT] ${line}`);
-            logBuffer.push({ timestamp: Date.now(), type: 'stdout', line });
-        }
-    });
+    if (childProcess && childProcess.stdout) {
+        childProcess.stdout.on('data', (data) => {
+            const lines = data.toString().split('\n').filter((line: string) => line.length > 0);
+            for (const line of lines) {
+                console.log(`[CHILD_STDOUT] ${line}`);
+                logBuffer.push({ timestamp: Date.now(), type: 'stdout', line });
+            }
+        });
+    } else {
+        console.warn('[WRAPPER_WARN] Child process stdout is not available.');
+    }
 
-    childProcess.stderr.on('data', (data) => {
-        const lines = data.toString().split('\n').filter((line: string) => line.length > 0);
-        for (const line of lines) {
-            console.error(`[CHILD_STDERR] ${line}`);
-            logBuffer.push({ timestamp: Date.now(), type: 'stderr', line });
-        }
-    });
+    if (childProcess && childProcess.stderr) {
+        childProcess.stderr.on('data', (data) => {
+            const lines = data.toString().split('\n').filter((line: string) => line.length > 0);
+            for (const line of lines) {
+                console.error(`[CHILD_STDERR] ${line}`);
+                logBuffer.push({ timestamp: Date.now(), type: 'stderr', line });
+            }
+        });
+    } else {
+        console.warn('[WRAPPER_WARN] Child process stderr is not available.');
+    }
 
-    childProcess.on('error', (error) => {
-        console.error(`[WRAPPER_ERROR] Failed to start child process: ${error.message}`);
-        if (ipcServer) ipcServer.close();
-        try { fsSync.unlinkSync(socketPath); } catch { }
-        process.exit(1);
-    });
+    if (childProcess) {
+        childProcess.on('error', (error) => {
+            console.error(`[WRAPPER_ERROR] Failed to start child process: ${error.message}`);
+            if (ipcServer) ipcServer.close();
+            try { fsSync.unlinkSync(socketPath); } catch { }
+            childProcess = null; // Clear reference
+            process.exit(1);
+        });
+    }
 
     const cleanupAndExit = (code: number | null) => {
         console.log(`\nChild process exited with code ${code}`);
@@ -200,13 +229,16 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
                         console.log('[WRAPPER] Closing IPC server...');
                         ipcServer.close(() => {
                             console.log('[IPC_SERVER] Server closed.');
+                            childProcess = null; // Clear reference
                             doCleanup();
                         });
                         setTimeout(() => {
                             console.warn('[IPC_SERVER] Server close timed out. Forcing exit.');
+                            childProcess = null; // Clear reference
                             doCleanup();
                         }, 2000);
                     } else {
+                        childProcess = null; // Clear reference
                         doCleanup();
                     }
                 });
@@ -220,28 +252,35 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
                 console.log('[WRAPPER] Closing IPC server...');
                 ipcServer.close(() => {
                     console.log('[IPC_SERVER] Server closed.');
+                    childProcess = null; // Clear reference
                     doCleanup();
                 });
                 setTimeout(() => {
                     console.warn('[IPC_SERVER] Server close timed out. Forcing exit.');
+                    childProcess = null; // Clear reference
                     doCleanup();
                 }, 2000);
             } else {
+                childProcess = null; // Clear reference
                 doCleanup();
             }
         });
-        if (childProcess?.pid) {
+        if (childProcess && childProcess.pid) {
             treeKill(childProcess.pid, 'SIGKILL', (err) => {
                 if (err) {
                     console.error('[WRAPPER] Error killing process tree:', err);
                 } else {
-                    console.log(`[WRAPPER] Killed process tree for PID ${childProcess.pid}`);
+                    console.log(`[WRAPPER] Killed process tree for PID ${childProcess?.pid}`);
                 }
             });
+        } else {
+            console.warn('[WRAPPER_WARN] Cannot treeKill: child process or PID not available at that stage.');
         }
     };
 
-    childProcess.on('close', cleanupAndExit);
+    if (childProcess) {
+        childProcess.on('close', cleanupAndExit);
+    }
 
     // Graceful shutdown handling
     const gracefulShutdown = (signal: NodeJS.Signals) => {
@@ -250,14 +289,16 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
             console.log('[WRAPPER] Closing IPC server due to signal...');
             ipcServer.close(() => console.log('[IPC_SERVER] Server closed due to signal.'));
         }
-        if (childProcess?.pid) {
+        if (childProcess && childProcess.pid) {
             treeKill(childProcess.pid, 'SIGKILL', (err) => {
                 if (err) {
                     console.error('[WRAPPER] Error killing process tree:', err);
                 } else {
-                    console.log(`[WRAPPER] Killed process tree for PID ${childProcess.pid}`);
+                    console.log(`[WRAPPER] Killed process tree for PID ${childProcess?.pid}`);
                 }
             });
+        } else {
+            console.warn('[WRAPPER_WARN] Cannot treeKill: child process or PID not available at that stage.');
         }
         // Note: The 'close' event on childProcess will trigger the final chopLogs and exit.
     };
@@ -267,56 +308,89 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
 };
 
 program
-    .version('0.2.0')
-    .description('A tool to wrap long-running processes and chop their logs on IPC request.')
-    .option('-l, --log-dir <path>', 'Directory to store chopped log files (default: system temp dir)')
-    .option('--log-prefix <prefix>', 'Prefix for log file names', 'log_')
-    .option('--pid <pid>', 'If set, send a log chop request to the chopup instance with this PID.')
-    .argument('[command_to_run...]', 'The command to run and its arguments')
-    .action(async (commandToRun: string[], options: { logDir?: string; logPrefix?: string; pid?: string }) => {
-        if (options.pid && (!commandToRun || commandToRun.length === 0)) {
-            // Send log chop request
-            const pid = Number.parseInt(options.pid, 10);
-            if (Number.isNaN(pid)) {
-                console.error('[REQUEST_LOGS_CLIENT_ERROR] Invalid PID');
-                process.exit(1);
-            }
-            const socketPath = getIpcSocketPath(pid);
-            console.log(`[REQUEST_LOGS_CLIENT] Connecting to PID ${pid} at socket: ${socketPath}`);
-            const client = net.createConnection(socketPath, () => {
-                console.log('[REQUEST_LOGS_CLIENT] Connected to chopup instance.');
-                client.write('CHOP_LOGS_REQUEST');
-                console.log('[REQUEST_LOGS_CLIENT] CHOP_LOGS_REQUEST sent.');
-            });
-            let responseData = '';
-            client.on('data', (data) => {
-                responseData += data.toString();
-                if (responseData.length > 0) {
-                    const receivedPath = responseData.trim();
-                    if (receivedPath === 'NO_NEW_LOGS') {
-                        console.log('[REQUEST_LOGS_CLIENT] No new logs to chop.');
-                    } else if (receivedPath.startsWith('ERROR_')) {
-                        console.error(`[REQUEST_LOGS_CLIENT_ERROR] Received error: ${receivedPath}`);
-                    } else {
-                        console.log(`[REQUEST_LOGS_CLIENT] New log file created: ${receivedPath}`);
-                    }
-                    client.end();
-                }
-            });
-            client.on('end', () => {
-                console.log('[REQUEST_LOGS_CLIENT] Disconnected from chopup instance.');
-            });
-            client.on('error', (err) => {
-                console.error('[REQUEST_LOGS_CLIENT_ERROR] Connection error:', err.message);
-                process.exit(1);
-            });
-            return;
-        }
-        // Otherwise, run as main wrapper
+    .name('chopup')
+    .description('Wraps a long-running process, monitors files, and segments logs.')
+    .version('1.0.0'); // Example version
+
+program
+    .command('run', { isDefault: true }) // Make this the default command
+    .description('Run the command and watch for logs/changes. This is the default behavior if no other command is specified.')
+    .option('-d, --log-dir <path>', 'Directory to store chopped log files.')
+    .option('-p, --log-prefix <prefix>', 'Prefix for chopped log file names (e.g., "myapp-"). Defaults to empty.')
+    // .option('-w, --watch <path>', 'File or directory to watch for changes (triggers log chopping).') // Future
+    .argument('<command_to_run...>', 'The command and its arguments to wrap and monitor.')
+    .action(async (commandToRun, options) => {
+        // Logic from existing mainAction
         await mainAction(commandToRun, options);
     });
 
+program
+    .command('request-logs')
+    .description('Requests the currently running chopup instance to chop and save logs.')
+    .requiredOption('--socket <path>', 'IPC socket path of the running chopup instance (from its startup logs).')
+    .action(async (options) => {
+        const client = net.createConnection({ path: options.socket }, () => {
+            console.log('[IPC_CLIENT] Connected to server.');
+            client.write('CHOP_LOGS_REQUEST');
+        });
+        client.on('data', (data) => {
+            const response = data.toString();
+            if (response === 'NO_NEW_LOGS') {
+                console.log('[IPC_CLIENT] Server responded: No new logs to chop.');
+            } else if (response.startsWith('ERROR_')) {
+                console.error(`[IPC_CLIENT] Server error: ${response}`);
+            } else {
+                console.log(`[IPC_CLIENT] Logs chopped to: ${response}`);
+            }
+            client.end();
+        });
+        client.on('error', (err) => {
+            console.error('[IPC_CLIENT_ERROR] Connection error:', err.message);
+        });
+        client.on('end', () => {
+            console.log('[IPC_CLIENT] Disconnected from server.');
+        });
+    });
+
+program
+    .command('send-input')
+    .description('Sends an input string to the stdin of the wrapped process via IPC.')
+    .requiredOption('--socket <path>', 'IPC socket path of the running chopup instance.')
+    .requiredOption('--input <string>', 'The string to send to the process stdin.')
+    .action(async (options) => {
+        const client = net.createConnection({ path: options.socket }, () => {
+            console.log('[IPC_CLIENT] Connected to server to send input.');
+            // Ensure newline if it's line-based input, though the server adds one too.
+            // User might send multi-line, so let server handle final newline for prompt.
+            const message = `SEND_INPUT_REQUEST ${options.input}`;
+            console.log(`[IPC_CLIENT] Sending: "${message}"`);
+            client.write(message);
+        });
+        client.on('data', (data) => {
+            const response = data.toString();
+            console.log(`[IPC_CLIENT] Server response: ${response}`);
+            client.end();
+        });
+        client.on('error', (err) => {
+            console.error('[IPC_CLIENT_ERROR] Connection error while sending input:', err.message);
+        });
+        client.on('end', () => {
+            console.log('[IPC_CLIENT] Disconnected from server after sending input.');
+        });
+    });
+
+// if (process.argv.length <= 2 || process.argv[2] === '--') { // Heuristic for default command
+//     program.parse([process.argv[0], process.argv[1], 'run', ...process.argv.slice(2)], { from: 'user' });
+// } else {
+//     program.parse(process.argv, { from: 'user' });
+// }
+
+// Simplified parsing:
+// Commander now handles default command properly if 'run' is marked as default.
+// The initial effectiveArgv handling should prepare argv for direct parsing.
 program.parse(effectiveArgv);
+
+// treeKill(childProcess.pid); // Example, ensure proper cleanup
 
 // if (!process.argv.slice(2).length) {
 //   program.outputHelp();
