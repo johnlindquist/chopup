@@ -38,6 +38,7 @@ core directories:
 - dist/: Contains the compiled JavaScript output.
 - my_test_logs/: Directory used for storing chopped logs during testing (user-created, can be configured via --log-dir).
 - .cursor/rules/: Contains Cursor rule definitions like this one.
+- tmp/: For storing test-specific files (e.g., temporary test scripts, mock data related to tests, but not general scratch files).
 diagram/link: N/A at this time.
 
 ## 4. Coding Standards & Conventions
@@ -63,16 +64,17 @@ imports: Grouped (stdlib, external, internal - general good practice).
 
 framework: Manual testing via CLI commands and self-modifying scripts. (Future: Consider Vitest).
 types: End-to-end style testing of the CLI's core functionality.
-location: N/A for automated tests yet.
+location: Test-specific files (e.g., temporary test scripts, mock data) should be placed in the `tmp/` directory. General scratch/scrap files not related to a specific test should not be placed here.
 
 ## 7. Tooling & Workflow
 
 package manager: pnpm (specified in package.json `"packageManager": "pnpm@10.10.0"`)
 build command(s): `pnpm build` (executes `tsc`)
 run command(s):
-  - `pnpm dev` (executes `tsx src/index.ts`)
-  - `pnpm start` (executes `node dist/index.js`)
-  - Direct execution: `node dist/index.js [options] -- <command>`
+  - `pnpm dev -- [options_for_spawn-wrapper] -- <command_to_wrap...>` (executes `tsx src/index.ts`)
+  - `pnpm start -- [options_for_spawn-wrapper] -- <command_to_wrap...>` (executes `node dist/index.js`)
+  - Direct execution: `node dist/index.js [options_for_spawn-wrapper] -- <command_to_wrap...>`
+  - Note on argument passing: When using `pnpm run <script> -- ...`, arguments after the *first* `--` are passed to the script. If the script itself (like `spawn-wrapper`) uses `--` to delimit a sub-command, ensure options for the script precede its own `--`. For example: `pnpm start --watch <file> --log-dir <dir> -- <your_command> <your_command_args>` should be invoked as `pnpm start --watch <file> --log-dir <dir> -- <your_command> <your_command_args>`. The initial `--` after `pnpm start` is crucial for `pnpm` to pass arguments to the script rather than interpreting them as `pnpm` options. However, when using tools that construct commands from `command` and `args` arrays (like some internal testing or shell execution tools), the `pnpm` command might be the main `command` and all subsequent parts (e.g., `start`, `--watch <file>`, `--`, `<your_command>`) become items in the `args` array, omitting the initial `--` that `pnpm` itself would strip.
 version control: Git (assumed, standard for such projects).
 ci/cd: N/A defined yet.
 
