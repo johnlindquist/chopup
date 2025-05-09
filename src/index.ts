@@ -124,6 +124,8 @@ const mainAction = async (commandToRun: string[], options: { logDir?: string; lo
                 }
             } else if (message.startsWith('SEND_INPUT_REQUEST ')) {
                 const inputToSend = message.substring('SEND_INPUT_REQUEST '.length);
+                // Log the event: input, timestamp, wrapper PID
+                console.log(`[WRAPPER_INPUT_SENT] Timestamp: ${new Date().toISOString()}, PID: ${process.pid}, Input: "${inputToSend}"`);
                 console.log(`[IPC_SERVER] Processing SEND_INPUT_REQUEST with input: "${inputToSend}"`);
                 if (childProcess && childProcess.stdin && !childProcess.stdin.destroyed) {
                     try {
