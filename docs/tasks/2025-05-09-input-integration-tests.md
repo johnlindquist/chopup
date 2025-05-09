@@ -1,6 +1,6 @@
 # Task: Enhance Input Sending Integration Tests
 
-## Commit 1: Chore: Setup test infrastructure for input scenarios
+## Commit 1: Chore: Setup test infrastructure for input scenarios ✅ 2a495403a8ddf5b6132fee4d2798346e8dfcc934
 **Description:**
 Create a new directory `test/integration/input-tests/` to house tests specifically for input sending scenarios. Develop a helper script or set of functions, potentially in a new `test/integration/test-utils/input-helpers.ts` or by extending existing test utilities. This helper will streamline:
 1.  Spawning `chopup` to wrap a dummy CLI script. The dummy scripts will be placed in `test/integration/input-tests/fixtures/scripts/`.
