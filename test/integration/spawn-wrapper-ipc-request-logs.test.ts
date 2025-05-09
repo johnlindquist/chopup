@@ -20,7 +20,7 @@ function killAllSpawnWrapperProcesses() {
         const lines = output.split('\n').filter(Boolean);
         for (const line of lines) {
             const parts = line.trim().split(/\s+/);
-            const pid = parseInt(parts[1], 10);
+            const pid = Number.parseInt(parts[1], 10);
             if (!isNaN(pid)) {
                 try {
                     process.kill(pid, 'SIGKILL');
@@ -122,7 +122,7 @@ describe('chopup IPC log chop integration', () => {
                 stdoutData += data.toString();
                 const match = stdoutData.match(/\[CHOPUP\] PID: (\d+)/);
                 if (match) {
-                    chopupPid = parseInt(match[1], 10);
+                    chopupPid = Number.parseInt(match[1], 10);
                     resolve();
                 }
             });

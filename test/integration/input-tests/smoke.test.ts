@@ -1,23 +1,42 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'node:path';
 import fsSync from 'node:fs';
-import { spawnChopupWithScript } from '../test-utils/input-helpers';
+import { spawnChopupWithScript, TMP_DIR } from '../test-utils/input-helpers';
 import type { ChopupInstance } from '../test-utils/input-helpers';
+import fs from 'node:fs/promises';
 
-const SCRIPT_DIR = path.resolve(__dirname, 'fixtures/scripts');
-const ECHO_SCRIPT_PATH = path.join(SCRIPT_DIR, 'echo-input.js');
+const SCRIPT_NAME = 'echo-input.js';
+const FIXTURES_DIR = path.resolve(__dirname, 'fixtures/scripts');
+const scriptPath = path.join(FIXTURES_DIR, SCRIPT_NAME);
+
+const testRunId = `smoke_test_${Date.now()}`;
+const baseLogDir = path.join(TMP_DIR, 'input-test-logs', testRunId);
+const outputDir = path.join(baseLogDir, 'outputs');
 
 describe('Input Sending Smoke Test', () => {
     let chopupInstance: ChopupInstance | null = null;
+
+    beforeAll(async () => {
+        await fs.mkdir(outputDir, { recursive: true });
+        try {
+            await fs.access(scriptPath, fs.constants.X_OK);
+        } catch {
+            await fs.chmod(scriptPath, '755');
+        }
+    });
 
     afterAll(async () => {
         if (chopupInstance) {
             await chopupInstance.cleanup();
         }
+        // Optionally clean up logs
+        // await fs.rm(baseLogDir, { recursive: true, force: true });
     });
 
     it('should successfully send input to a wrapped script and verify its output', async () => {
-        chopupInstance = await spawnChopupWithScript(ECHO_SCRIPT_PATH, [], 'smoke_test_');
+        const testId = 'smoke_test';
+        const outputFile = path.join(outputDir, `${testId}_output.txt`);
+        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId);
         expect(chopupInstance).toBeDefined();
         expect(chopupInstance.socketPath).toBeDefined();
         expect(fsSync.existsSync(chopupInstance.socketPath)).toBe(true);

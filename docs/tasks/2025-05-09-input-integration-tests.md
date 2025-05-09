@@ -19,7 +19,7 @@ Create a basic "smoke" test within `test/integration/input-tests/smoke.test.ts`.
 
 ---
 
-## Commit 2: Feat: Add integration test for single character input (e.g., Y/N prompt)
+## Commit 2: Feat: Add integration test for single character input (e.g., Y/N prompt) ✅ 25e4378346025150cacdda9799e264d1dc8139e6
 **Description:**
 1.  Create a dummy Node.js CLI script: `test/integration/input-tests/fixtures/scripts/yes-no-prompt.js`. This script will:
     *   Print a prompt like "Confirm? (y/n): ".

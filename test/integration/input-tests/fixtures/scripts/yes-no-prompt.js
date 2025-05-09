@@ -33,7 +33,7 @@ rl.question("Confirm? (y/n): ", (answer) => {
 	} else {
 		response = `Invalid input: ${answer}`;
 	}
-	writeStream.write(response + "\n");
+	writeStream.write(`${response}\n`);
 	writeStream.end(() => {
 		rl.close();
 		process.exit(0);

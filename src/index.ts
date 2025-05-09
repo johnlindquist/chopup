@@ -36,6 +36,11 @@ let lastChopTime = Date.now();
 let ipcServer: net.Server | null = null;
 let childProcess: ReturnType<typeof spawn> | null = null; // Keep a reference to childProcess
 
+// Logging helpers for observability
+function log(...args: unknown[]) { console.log(...args); }
+function logWarn(...args: unknown[]) { console.warn(...args); }
+function logError(...args: unknown[]) { console.error(...args); }
+
 function sanitizeForFolder(name: string): string {
     return name
         .replace(/[^a-zA-Z0-9_-]+/g, "_")
@@ -139,48 +144,43 @@ const mainAction = async (
     ipcServer = net.createServer((socket) => {
         console.log('[IPC_SERVER] Client connected.');
         socket.on('data', async (data) => {
-            const message = data.toString();
-            console.log('[IPC_SERVER] Received message (raw):', message);
-            const trimmedMessage = message.trim();
-            console.log('[IPC_SERVER] Received message (trimmed):', trimmedMessage);
+            const rawMessage = data.toString();
+            log(`IPC: Received raw message: "${rawMessage.replace(/\n/g, '\\n')}" (length: ${rawMessage.length})`);
 
-            if (trimmedMessage === 'CHOP_LOGS_REQUEST') {
-                console.log('[IPC_SERVER] Processing CHOP_LOGS_REQUEST...');
+            // Prioritize exact command matches
+            if (rawMessage.trim() === 'REQUEST_LOGS') {
+                log('IPC: Matched REQUEST_LOGS');
                 const newLogFilePath = await chopLogs();
                 if (newLogFilePath) {
-                    socket.write(newLogFilePath);
-                    console.log(`[IPC_SERVER] Sent log file path to client: ${newLogFilePath}`);
+                    socket.write(`LOG_CHOPPED:${newLogFilePath}`);
                 } else {
                     socket.write('NO_NEW_LOGS');
-                    console.log('[IPC_SERVER] Sent NO_NEW_LOGS to client.');
                 }
-            } else if (trimmedMessage.startsWith('SEND_INPUT_REQUEST ')) {
-                const inputRequestPrefix = 'SEND_INPUT_REQUEST ';
-                let inputToSend = '';
-                if (message.startsWith(inputRequestPrefix)) {
-                    inputToSend = message.substring(inputRequestPrefix.length);
-                } else {
-                    console.warn('[IPC_SERVER] Mismatch between trimmed and original message for input extraction. Falling back to trimmed.')
-                    inputToSend = trimmedMessage.substring(inputRequestPrefix.length);
+            } else if (rawMessage.startsWith('SEND_INPUT_REQUEST')) {
+                // Accept both 'SEND_INPUT_REQUEST' and 'SEND_INPUT_REQUEST <payload>'
+                let inputPayload = '';
+                if (rawMessage === 'SEND_INPUT_REQUEST' || rawMessage === 'SEND_INPUT_REQUEST\n') {
+                    inputPayload = '';
+                } else if (rawMessage.startsWith('SEND_INPUT_REQUEST ')) {
+                    inputPayload = rawMessage.substring('SEND_INPUT_REQUEST '.length);
                 }
-
-                console.log(`[WRAPPER_INPUT_SENT] Timestamp: ${new Date().toISOString()}, PID: ${process.pid}, Input (to send): "${inputToSend}"`);
-                if (childProcess?.stdin && !childProcess.stdin.destroyed) {
-                    try {
-                        childProcess.stdin.write(inputToSend);
-                        childProcess.stdin.end();
-                        console.log('[IPC_SERVER] Sent input to child process stdin and closed it.');
-                        socket.write('INPUT_SENT_AND_STDIN_CLOSED');
-                    } catch (error) {
-                        console.error('[IPC_SERVER_ERROR] Failed to write to child process stdin:', error);
-                        socket.write('ERROR_SENDING_INPUT');
-                    }
+                log(`IPC: Matched SEND_INPUT_REQUEST. Payload: "${inputPayload.replace(/\n/g, '\\n')}"`);
+                if (childProcess?.stdin && !childProcess?.stdin?.destroyed) {
+                    childProcess.stdin.write(inputPayload, (err) => {
+                        if (err) {
+                            logError(`IPC: Error writing to child stdin: ${err.message}`);
+                            socket.write('INPUT_SEND_ERROR');
+                        } else {
+                            log('IPC: Input sent successfully');
+                            socket.write('INPUT_SENT');
+                        }
+                    });
                 } else {
-                    console.warn('[IPC_SERVER] Cannot send input: child process or stdin not available.');
-                    socket.write('ERROR_CHILD_PROCESS_NOT_Available');
+                    logWarn('IPC: Child process or stdin not available for input for SEND_INPUT_REQUEST.');
+                    socket.write('INPUT_SEND_ERROR_NO_CHILD');
                 }
             } else {
-                console.log('[IPC_SERVER] Unknown message:', message);
+                logWarn(`IPC: Unknown message: "${rawMessage.replace(/\n/g, '\\n')}"`);
                 socket.write('ERROR_UNKNOWN_MESSAGE');
             }
             socket.end();
@@ -420,7 +420,7 @@ program
     .action(async (options) => {
         const client = net.createConnection({ path: options.socket }, () => {
             console.log("[IPC_CLIENT] Connected to server.");
-            client.write("CHOP_LOGS_REQUEST");
+            client.write("REQUEST_LOGS");
         });
         client.on("data", (data) => {
             const response = data.toString();
