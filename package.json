@@ -12,7 +12,7 @@
     "start": "node dist/index.js",
     "format": "biome format --write ./src",
     "lint": "biome lint --apply ./src",
-    "test": "vitest",
+    "test": "vitest run",
     "test:watch": "vitest --watch",
     "test:integration": "vitest run test/integration"
   },
