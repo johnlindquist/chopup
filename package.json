@@ -1,10 +1,10 @@
 {
-  "name": "spawn-wrapper",
+  "name": "chopup",
   "version": "1.0.0",
   "description": "A tool to wrap long-running processes and chop their logs based on file changes.",
   "main": "dist/index.js",
   "bin": {
-    "spawn-wrapper": "dist/index.js"
+    "chopup": "dist/index.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -12,7 +12,9 @@
     "start": "node dist/index.js",
     "format": "biome format --write ./src",
     "lint": "biome lint --apply ./src",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:integration": "vitest run test/integration"
   },
   "keywords": [],
   "author": "",
@@ -23,7 +25,10 @@
     "@types/node": "^22.15.17",
     "chokidar": "^4.0.3",
     "commander": "^13.1.0",
+    "npm-name": "^8.0.0",
+    "tree-kill": "^1.2.2",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^1.6.1"
   }
 }

@@ -1,6 +1,6 @@
 ---
-description: Spec manager. Load when the user requests to create/update the "spec"
-globs: 
+description:
+globs:
 alwaysApply: false
 ---
 ## OpenAPI Specification Management Rule
@@ -67,4 +67,4 @@ The `docs/openapi.yaml` file must follow the structure below, derived from the "
     * For each schema (e.g., `User`):
         * `type: object`
         * `properties`: Define its fields.
-            * For each property (e.g., `id`, `username`, `
+            * For each property (e.g., `id`, `username`,

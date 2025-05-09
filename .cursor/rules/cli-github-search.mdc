@@ -1,6 +1,6 @@
 ---
-description: GitHub Search Rules. Invoke with "Search GitHub" or "Search GitHub for Examples"
-globs: 
+description:
+globs:
 alwaysApply: false
 ---
 Usage: ghx [options]

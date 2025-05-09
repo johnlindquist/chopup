@@ -1,13 +1,13 @@
 ---
-description: 
-globs: 
+description:
+globs:
 alwaysApply: false
 ---
-# .cursor/rules/always-project.mdc manager
+# .cursor/rules/_project.mdc manager
 
 ## Core Directive
 
-Update .cursor/rules/always-project.mdc based on project's configuration and docs
+Update .cursor/rules/_project.mdc based on project's configuration and docs
 
 ## Task
 
@@ -16,12 +16,12 @@ Gather project information about configuration, libraries:
 - read all files in docs
 
 Read and update the following file with the information you find:
-- ./cursor/rules/always-project.mdc
+- ./cursor/rules/_project.mdc
 
 
-## .cursor/rules/always-project.mdc Template
+## .cursor/rules/_project.mdc Template
 
-Use this template as guide for creating the always-project.mdc:
+Use this template as guide for creating the _project.mdc:
 
 <template>
 ---

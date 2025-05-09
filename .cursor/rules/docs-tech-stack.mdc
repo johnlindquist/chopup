@@ -1,6 +1,6 @@
 ---
-description: Invoke with "create a tech stack". Manages docs/TECH_STACK.md
-globs: 
+description:
+globs:
 alwaysApply: false
 ---
 # Tech Stack Management Rule

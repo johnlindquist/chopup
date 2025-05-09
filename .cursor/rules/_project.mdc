@@ -1,0 +1,112 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# spawn-wrapper - Project Rules
+
+## 1. Project Overview
+
+goal: CLI tool to wrap long-running processes, monitor files for changes, and segment logs based on file events or IPC requests.
+type: CLI Tool
+key features:
+- Wraps and runs any user-specified command (now direct passthrough, no subcommand)
+- Monitors a specified file or directory for changes (add, change, unlink)
+- Captures stdout and stderr from the wrapped process
+- Segments/chops logs into new files in a specified log directory on file change or IPC request
+- Graceful shutdown and bulletproof process tree cleanup
+- IPC server for on-demand log chopping via meta file
+
+## 2. Technology Stack
+
+language(s): TypeScript ^5.8.3
+framework(s): None (CLI, not web)
+ui library/styling: N/A
+database(s): N/A
+state management: N/A
+api layer: N/A
+key libraries:
+- commander (CLI parsing)
+- chokidar (file watching)
+- tree-kill (process tree cleanup)
+- vitest (testing)
+- tsx (dev execution)
+- @biomejs/biome (format/lint)
+
+## 3. Project Structure
+
+main source directory: src/
+core directories:
+- src/: Main TypeScript source (index.ts)
+- dist/: Compiled output
+- test/: Integration tests (Vitest)
+- tmp/: Test-specific files, test apps, logs
+diagram/link: N/A
+
+## 4. Coding Standards & Conventions
+
+language usage: Strict TypeScript, async/await, avoid any, use node: imports
+naming conventions:
+- files/folders: kebab-case
+- variables/functions: camelCase
+- types/interfaces: PascalCase
+code style/formatting: @biomejs/biome (see package.json scripts)
+comments: English, JSDoc for types, TODO for pending work
+imports: Grouped (stdlib, external, internal)
+
+## 5. Key Principles & Best Practices
+
+- Observability: Log all key events (file changes, log chopping, process start/exit, IPC)
+- Robustness: Handle errors gracefully, validate paths, clean up all processes
+- User Experience: Clear CLI options, helpful errors, predictable behavior
+- Modularity: CLI subcommands for separation of concerns
+- Bulletproof process cleanup: Use tree-kill for all child/grandchild processes
+
+## 6. Testing
+
+framework: Vitest
+types: Integration tests for CLI, IPC, and log chopping
+location: test/integration/
+notes: Tests must use passthrough CLI (no subcommand) and verify meta file, log chopping, and process cleanup. Use tree-kill for teardown.
+
+## 7. Tooling & Workflow
+
+package manager: pnpm
+build command(s): pnpm build
+run command(s):
+  - pnpm dev -- <command_to_wrap...>
+  - pnpm start -- <command_to_wrap...>
+  - node dist/index.js -- <command_to_wrap...>
+  - pnpm dev request-logs --meta-file <meta.json>
+version control: Git
+ci/cd: N/A
+
+## 8. (Optional) Database / API Guidelines
+
+N/A
+
+## 9. (Optional) Specific Feature Rules
+
+- Log Chopping: Logs are chopped on file events or IPC request. Each chop includes logs since last chop time. Final chop on process exit.
+- File Watching: Chokidar monitors add/change/unlink events.
+- IPC: Meta file written with PID and port. request-logs subcommand connects to IPC server for on-demand log chopping.
+- CLI: All main options must follow root command. No subcommand required for passthrough.
+- Process Cleanup: tree-kill is used in both CLI and tests to ensure all spawned processes are killed on shutdown or test teardown.
+
+## 10. (Optional) Rule Referencing
+
+- See [always-global.mdc](mdc:.cursor/rules/always-global.mdc) for global principles.
+
+---
+
+# Project Update Notes
+
+## 1. Avoidable Failures
+- Initial test app contained invalid TypeScript/JSX, breaking the build. Solution: Use valid Next.js page export.
+- TypeScript build failed due to test/ and tmp/ files outside rootDir. Solution: Added "exclude": ["test", "tmp"] to tsconfig.json.
+- TypeScript build failed due to dist/index.d.ts overwrite. Solution: Manually removed dist/index.d.ts and rebuilt.
+
+## 2. Changes to Project Behavior/Expectations
+- CLI now supports direct passthrough: `npx chopup pnpm dev` (with required options), no subcommand required.
+- Tests updated to verify passthrough CLI behavior.
+- tsconfig.json now excludes test/ and tmp/ from build.

@@ -1,5 +1,5 @@
 ---
-description: Task Execution Rules. Invoke with "execute this task"
+description:
 globs:
 alwaysApply: false
 ---
@@ -12,3 +12,9 @@ Execute instructions provided in an included task file (e.g., `<task>.md`).*
 - After each successful `git commit`, update the corresponding commit title line in the `<task>.md` file with a ✅ emoji and the commit SHA hash.
 
 After commiting, automatically proceed to the next commit without asking for me input.
+
+## After Task Completion
+
+Once the task is complete, run the `.cursor/rules/update-project.mdc` with the following information:
+1. Failures that could have been avoided
+2. Changes to project behavior or expectations

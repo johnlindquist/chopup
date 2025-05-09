@@ -1,5 +1,5 @@
 ---
-description: Diagram Creation Rules. Invoke with "Create diagram", "Update diagram", etc.
+description:
 globs:
 alwaysApply: false
 ---

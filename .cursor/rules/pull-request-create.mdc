@@ -1,5 +1,5 @@
 ---
-description: Pull Request Rules. Invoke with "Create a Pull Request" or "Create a PR"
+description:
 globs:
 alwaysApply: false
 ---

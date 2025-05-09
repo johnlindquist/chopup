@@ -1,5 +1,5 @@
 ---
-description: Task Manager. Load when a user requests to "Create a task" or any "task"-related language.
+description:
 globs:
 alwaysApply: false
 ---

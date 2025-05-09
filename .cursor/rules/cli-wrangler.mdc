@@ -1,6 +1,6 @@
 ---
-description: Wrangler runner. Load when a user requests to run a wrangler command.
-globs: 
+description:
+globs:
 alwaysApply: false
 ---
 # Wrangler CLI Documentation (Generated from Actual CLI Output)

@@ -1,6 +1,6 @@
 ---
-description: Worktree manager. Load when a user requests "Create a worktree", "purge worktrees", etc.
-globs: 
+description:
+globs:
 alwaysApply: false
 ---
 To manage worktrees, use the `wt` cli

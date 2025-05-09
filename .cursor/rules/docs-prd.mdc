@@ -1,5 +1,5 @@
 ---
-description: PRD Creator. Invoke with "Create a PRD"
+description:
 globs:
 alwaysApply: false
 ---
