@@ -134,4 +134,107 @@ describe('spawn-wrapper send-input command', () => {
             }
         }
     }, 15000); // Increased timeout for multiple process interactions
+
+    it('should fail gracefully if the target socket path is invalid', async () => {
+        const invalidSocketPath = join(tmpdir(), 'nonexistent-chopup.sock');
+        const sendInputCommand = `node ${CLI_PATH} send-input --socket "${invalidSocketPath}" --input "test"`;
+        console.log(`[TEST_RUN_ERROR_SCENARIO] Executing send-input to invalid socket: ${sendInputCommand}`);
+
+        let stderrOutput = '';
+        try {
+            await new Promise<void>((resolve, reject) => {
+                exec(sendInputCommand, (error, stdout, stderr) => {
+                    process.stderr.write(`[SEND_INPUT_INVALID_SOCKET_STDOUT] ${stdout}`);
+                    process.stderr.write(`[SEND_INPUT_INVALID_SOCKET_STDERR] ${stderr}`);
+                    stderrOutput = stderr; // Capture stderr
+                    if (error) {
+                        // Expected to error out
+                        console.log('[TEST_RUN_ERROR_SCENARIO] send-input to invalid socket failed as expected.');
+                        resolve(); // Resolve because error is expected
+                        return;
+                    }
+                    // If it somehow doesn't error, fail the test
+                    reject(new Error('send-input to invalid socket should have failed but did not.'));
+                });
+            });
+        } catch (e) {
+            // This catch is for the promise rejection, not the exec error itself handled above.
+        }
+        expect(stderrOutput).toMatch(/Connection error.*(ENOENT|ECONNREFUSED)/i); // ENOENT or ECONNREFUSED depending on OS/timing
+    }, 10000);
+
+    it('should fail gracefully if the wrapped process has already exited', async () => {
+        let wrapperProcess;
+        let ipcSocketPath = '';
+        const quickExitScriptContent = "console.log('Quick exit!'); process.exit(0);";
+        const quickExitScriptPath = join(TEST_SCRIPT_DIR, 'quick-exit-script.js');
+        writeFileSync(quickExitScriptPath, quickExitScriptContent, 'utf8');
+
+        try {
+            console.log(`[TEST_RUN_CHILD_EXITED] Starting wrapper with quick exit script: node ${CLI_PATH} run node ${quickExitScriptPath}`);
+            wrapperProcess = spawn('node', [CLI_PATH, 'run', 'node', quickExitScriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+            let wrapperOutput = '';
+            const socketPathPromise = new Promise<string>((resolve, reject) => {
+                wrapperProcess.stdout.on('data', (data) => {
+                    const text = data.toString();
+                    wrapperOutput += text;
+                    process.stderr.write(`[WRAPPER_QUICK_EXIT_STDOUT] ${text}`);
+                    const match = text.match(/IPC socket: (.*)/);
+                    if (match && match[1]) {
+                        resolve(match[1].trim());
+                    }
+                });
+                wrapperProcess.on('exit', () => setTimeout(() => reject(new Error('Wrapper exited before IPC socket was found')), 50));
+            });
+            ipcSocketPath = await socketPathPromise;
+            console.log(`[TEST_RUN_CHILD_EXITED] Wrapper started, IPC socket: ${ipcSocketPath}`);
+
+            // Wait for the child (and thus wrapper) to likely exit
+            await new Promise(resolve => wrapperProcess.on('exit', resolve));
+            console.log('[TEST_RUN_CHILD_EXITED] Wrapper process has exited.');
+            await new Promise(r => setTimeout(r, 500)); // Give time for socket to be cleaned up / server to shut down fully
+
+            const sendInputCommand = `node ${CLI_PATH} send-input --socket "${ipcSocketPath}" --input "test"`;
+            console.log(`[TEST_RUN_CHILD_EXITED] Executing send-input: ${sendInputCommand}`);
+
+            let stderrOutput = '';
+            let stdoutOutput = '';
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    exec(sendInputCommand, (error, stdout, stderr) => {
+                        stdoutOutput = stdout;
+                        stderrOutput = stderr;
+                        process.stderr.write(`[SEND_INPUT_CHILD_EXITED_STDOUT] ${stdout}`);
+                        process.stderr.write(`[SEND_INPUT_CHILD_EXITED_STDERR] ${stderr}`);
+                        // Expect an error from the CLI tool or connection refused
+                        if (stderr.includes('ERROR_CHILD_PROCESS_NOT_AVAILABLE') || stderr.match(/Connection error.*(ECONNREFUSED|ENOENT)/i)) {
+                            console.log('[TEST_RUN_CHILD_EXITED] send-input failed as expected after child exit.');
+                            resolve();
+                        } else if (error) { // Other CLI errors are also acceptable failures
+                            console.log('[TEST_RUN_CHILD_EXITED] send-input failed with CLI error as expected.');
+                            resolve();
+                        }
+                        else {
+                            reject(new Error('send-input after child exit should have failed or reported child not available.'));
+                        }
+                    });
+                });
+            } catch (e) { /* Handled by promise rejection */ }
+
+            // Check that either the specific server error was received, or a connection error occurred
+            const receivedChildProcessNotAvailableError = stderrOutput.includes('ERROR_CHILD_PROCESS_NOT_AVAILABLE') || stdoutOutput.includes('ERROR_CHILD_PROCESS_NOT_AVAILABLE');
+            const receivedConnectionError = !!stderrOutput.match(/Connection error.*(ECONNREFUSED|ENOENT)/i);
+            const success = receivedChildProcessNotAvailableError || receivedConnectionError;
+            expect(success).toBeTruthy();
+
+        } finally {
+            if (wrapperProcess && wrapperProcess.pid && !wrapperProcess.killed) {
+                await new Promise<void>(resolveKill => treeKill(wrapperProcess.pid, 'SIGKILL', resolveKill));
+            }
+            if (existsSync(quickExitScriptPath)) unlinkSync(quickExitScriptPath);
+            // Socket should ideally be cleaned by wrapper, but if test fails early, it might not be
+            if (ipcSocketPath && existsSync(ipcSocketPath)) { try { unlinkSync(ipcSocketPath); } catch (e) { } }
+        }
+    }, 15000); // Increased timeout
 }); 
