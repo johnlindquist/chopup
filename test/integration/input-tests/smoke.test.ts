@@ -47,8 +47,8 @@ describe('Input Sending Smoke Test', () => {
         console.log('[SMOKE_TEST] Sending input');
         await chopupInstance.sendInput(testInput);
 
-        console.log('[SMOKE_TEST] Waiting 200ms for output');
-        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log('[SMOKE_TEST] Waiting 100ms for output');
+        await new Promise(resolve => setTimeout(resolve, 100));
 
         console.log('[SMOKE_TEST] Checking output');
         const output = await chopupInstance.getWrappedProcessOutput();
@@ -56,6 +56,7 @@ describe('Input Sending Smoke Test', () => {
 
         console.log('[SMOKE_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
+        console.log('[SMOKE_TEST] chopupInstance cleanup complete');
 
         let socketGone = false;
         for (let i = 0; i < 10; i++) {
@@ -66,6 +67,9 @@ describe('Input Sending Smoke Test', () => {
                 break;
             }
             await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!socketGone) {
+            console.error(`[SMOKE_TEST] ERROR: Socket file still exists after 1s: ${chopupInstance.socketPath}`);
         }
         console.log(`[SMOKE_TEST] Final socketGone: ${socketGone}, exists: ${fsSync.existsSync(chopupInstance.socketPath)}`);
         expect(socketGone).toBe(true);
