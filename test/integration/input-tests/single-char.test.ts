@@ -44,12 +44,19 @@ describe('Single Character Input Test', () => {
         console.log('[SINGLE_CHAR_TEST] Sending input: y');
         await chopupInstance.sendInput(testInput);
 
-        console.log('[SINGLE_CHAR_TEST] Waiting 200ms for output');
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        console.log('[SINGLE_CHAR_TEST] Checking output');
-        const output = await chopupInstance.getWrappedProcessOutput();
-        expect(output.trim()).toBe('Confirmed: yes');
+        let output = '';
+        let found = false;
+        const start = Date.now();
+        while (Date.now() - start < 1000) {
+            output = await chopupInstance.getWrappedProcessOutput();
+            if (output.trim() === 'Confirmed: yes') {
+                found = true;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 100));
+        }
+        console.log('[SINGLE_CHAR_TEST] Output:', output.trim());
+        expect(found).toBe(true);
         console.log('[SINGLE_CHAR_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
         console.log('[SINGLE_CHAR_TEST] Test end: y');
@@ -68,12 +75,19 @@ describe('Single Character Input Test', () => {
         console.log('[SINGLE_CHAR_TEST] Sending input: N');
         await chopupInstance.sendInput(testInput);
 
-        console.log('[SINGLE_CHAR_TEST] Waiting 200ms for output');
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        console.log('[SINGLE_CHAR_TEST] Checking output');
-        const output = await chopupInstance.getWrappedProcessOutput();
-        expect(output.trim()).toBe('Confirmed: no');
+        let output = '';
+        let found = false;
+        const start = Date.now();
+        while (Date.now() - start < 1000) {
+            output = await chopupInstance.getWrappedProcessOutput();
+            if (output.trim() === 'Confirmed: no') {
+                found = true;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 100));
+        }
+        console.log('[SINGLE_CHAR_TEST] Output:', output.trim());
+        expect(found).toBe(true);
         console.log('[SINGLE_CHAR_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
         console.log('[SINGLE_CHAR_TEST] Test end: N');
@@ -92,12 +106,19 @@ describe('Single Character Input Test', () => {
         console.log('[SINGLE_CHAR_TEST] Sending input: maybe');
         await chopupInstance.sendInput(testInput);
 
-        console.log('[SINGLE_CHAR_TEST] Waiting 200ms for output');
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        console.log('[SINGLE_CHAR_TEST] Checking output');
-        const output = await chopupInstance.getWrappedProcessOutput();
-        expect(output.trim().startsWith('Invalid input:')).toBe(true);
+        let output = '';
+        let found = false;
+        const start = Date.now();
+        while (Date.now() - start < 1000) {
+            output = await chopupInstance.getWrappedProcessOutput();
+            if (output.trim().startsWith('Invalid input:')) {
+                found = true;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 100));
+        }
+        console.log('[SINGLE_CHAR_TEST] Output:', output.trim());
+        expect(found).toBe(true);
         console.log('[SINGLE_CHAR_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
         console.log('[SINGLE_CHAR_TEST] Test end: invalid');
