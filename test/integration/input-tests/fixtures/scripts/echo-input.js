@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import path from "node:path";
+const fs = require("node:fs");
+const path = require("node:path");
 
 const outputFilePath = process.argv[2];
 
@@ -10,6 +10,7 @@ if (!outputFilePath) {
 	process.exit(1);
 }
 
+console.log("[ECHO_INPUT] Script started. Output file:", outputFilePath);
 // Ensure the directory for the output file exists
 const outputDir = path.dirname(outputFilePath);
 if (!fs.existsSync(outputDir)) {
@@ -19,11 +20,14 @@ if (!fs.existsSync(outputDir)) {
 const writeStream = fs.createWriteStream(outputFilePath);
 
 process.stdin.on("data", (data) => {
+	console.log("[ECHO_INPUT] Received input:", data.toString());
 	writeStream.write(data);
 });
 
 process.stdin.on("end", () => {
-	writeStream.end();
+	writeStream.end(() => {
+		console.log("[ECHO_INPUT] Exiting. Wrote input to file.");
+	});
 });
 
 writeStream.on("error", (err) => {

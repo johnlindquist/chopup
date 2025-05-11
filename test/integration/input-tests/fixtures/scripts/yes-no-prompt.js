@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import path from "node:path";
-import readline from "node:readline";
+const fs = require("node:fs");
+const path = require("node:path");
+const readline = require("node:readline");
 
 const outputFilePath = process.argv[2];
 
@@ -17,6 +17,7 @@ if (!fs.existsSync(outputDir)) {
 	fs.mkdirSync(outputDir, { recursive: true });
 }
 
+console.log("[YES_NO_PROMPT] Script started. Output file:", outputFilePath);
 const writeStream = fs.createWriteStream(outputFilePath);
 const rl = readline.createInterface({
 	input: process.stdin,
@@ -33,8 +34,10 @@ rl.question("Confirm? (y/n): ", (answer) => {
 	} else {
 		response = `Invalid input: ${answer}`;
 	}
+	console.log("[YES_NO_PROMPT] Received input:", answer);
 	writeStream.write(`${response}\n`);
 	writeStream.end(() => {
+		console.log("[YES_NO_PROMPT] Exiting. Wrote response:", response);
 		rl.close();
 		process.exit(0);
 	});

@@ -28,7 +28,7 @@ export async function spawnChopupWithScript(
     scriptPath: string,
     scriptArgs: string[] = [],
     logPrefix = 'input_test_',
-    timeoutMs = 15000,
+    timeoutMs = 5000,
 ): Promise<ChopupInstance> {
     const instanceLogDir = path.join(LOG_DIR_BASE, `${logPrefix}${Date.now()}`);
     await fs.mkdir(instanceLogDir, { recursive: true });
@@ -49,6 +49,7 @@ export async function spawnChopupWithScript(
         ...scriptArgs // Only pass the output file as the first argument
     ];
 
+    console.log('[INPUT_HELPERS] Spawning chopup process:', command, args.join(' '));
     chopupProcess = spawn(command, args, {
         cwd: ROOT_DIR,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -67,6 +68,7 @@ export async function spawnChopupWithScript(
             if (socketMatch?.[1]) {
                 socketPath = socketMatch[1].trim();
                 clearTimeout(timeout);
+                console.log('[INPUT_HELPERS] Socket path found:', socketPath);
                 resolve(socketPath);
             }
         });
@@ -92,7 +94,11 @@ export async function spawnChopupWithScript(
     try {
         socketPath = await outputPromise;
         if (!fsSync.existsSync(socketPath)) {
-            await new Promise(r => setTimeout(r, 200));
+            console.log('[INPUT_HELPERS] Waiting for socket file to exist');
+            for (let i = 0; i < 50; i++) {
+                if (fsSync.existsSync(socketPath)) break;
+                await new Promise(r => setTimeout(r, 100));
+            }
             if (!fsSync.existsSync(socketPath)) {
                 throw new Error(`IPC socket file not found at ${socketPath} after delay. Stdout: ${stdoutData}`);
             }
@@ -106,6 +112,7 @@ export async function spawnChopupWithScript(
     }
 
     const cleanup = async () => {
+        console.log('[INPUT_HELPERS] cleanup: killing chopup process and removing log dir');
         if (chopupProcess?.pid && !chopupProcess?.killed) {
             const pid = chopupProcess.pid;
             await new Promise<void>((resolveKill, rejectKill) => {
@@ -132,22 +139,54 @@ export async function spawnChopupWithScript(
     const sendInput = async (input: string) => {
         if (!socketPath) throw new Error('Cannot send input: IPC socket path not found.');
         if (!chopupProcess || chopupProcess.killed) throw new Error('Cannot send input: chopup process is not running.');
-
-        const command = `node ${CHOPUP_PATH} send-input --socket "${socketPath}" --input "${input.replace(/"/g, '\\"')}"`;
-        return new Promise<void>((resolve, reject) => {
-            exec(command, (error, stdout, stderr) => {
-                if (stdout) process.stderr.write(`[SEND_INPUT_HELPER_STDOUT]: ${stdout}`);
-                if (stderr) process.stderr.write(`[SEND_INPUT_HELPER_STDERR]: ${stderr}`);
-                if (error) {
-                    return reject(new Error(`Failed to execute send-input: ${error.message}. Stderr: ${stderr}`));
+        console.log('[INPUT_HELPERS] sendInput: sending input', input);
+        const baseCommand = 'node';
+        const scriptArgs = [
+            CHOPUP_PATH,
+            'send-input',
+            '--socket',
+            socketPath,
+            '--input',
+            input.replace(/"/g, '\\"')
+        ];
+        return new Promise<void>((resolveExec, reject) => {
+            const sendInputProcess = spawn(baseCommand, scriptArgs, { stdio: 'pipe' });
+            let stdout = '';
+            let stderr = '';
+            let stdoutClosed = false;
+            let stderrClosed = false;
+            sendInputProcess.stdout.on('data', (data) => {
+                const dataStr = data.toString();
+                stdout += dataStr;
+                process.stdout.write(`[SEND_INPUT_HELPER_SPAWN_STDOUT] ${dataStr}`);
+            });
+            sendInputProcess.stdout.on('end', () => {
+                process.stdout.write(`[SEND_INPUT_HELPER_SPAWN_STDOUT_END]\n`);
+                stdoutClosed = true;
+            });
+            sendInputProcess.stderr.on('data', (data) => {
+                const dataStr = data.toString();
+                stderr += dataStr;
+                process.stderr.write(`[SEND_INPUT_HELPER_SPAWN_STDERR] ${dataStr}`);
+            });
+            sendInputProcess.stderr.on('end', () => {
+                process.stderr.write(`[SEND_INPUT_HELPER_SPAWN_STDERR_END]\n`);
+                stderrClosed = true;
+            });
+            sendInputProcess.on('exit', (code, signal) => {
+                process.stdout.write(`[SEND_INPUT_HELPER_SPAWN_EXIT] Code: ${code}, Signal: ${signal}, Stdout: "${stdout}", Stderr: "${stderr}", stdoutClosed: ${stdoutClosed}, stderrClosed: ${stderrClosed}\n`);
+                if (code !== 0) {
+                    console.error(`[SEND_INPUT_HELPER] send-input command failed. Code: ${code}, Signal: ${signal}, Stderr: ${stderr}, Stdout: ${stdout}`);
+                    return reject(new Error(`send-input failed with code ${code}, signal ${signal}: ${stderr || stdout}`));
                 }
-                if (stderr?.toLowerCase().includes('error')) {
-                    return reject(new Error(`send-input command reported an error: ${stderr}`));
+                if (!stdout.includes('INPUT_SENT')) {
+                    process.stderr.write(`[SEND_INPUT_HELPER] send-input command output did not include INPUT_SENT. Stdout: "${stdout}", Stderr: "${stderr}"\n`);
                 }
-                if (!stdout.includes('INPUT_SENT_AND_STDIN_CLOSED') && !stdout.includes('Input sent successfully')) { // Adjust based on actual success message
-                    console.warn(`[SEND_INPUT_HELPER] send-input command output did not explicitly confirm sending. Assuming success. Stdout: ${stdout}`);
-                }
-                resolve();
+                resolveExec();
+            });
+            sendInputProcess.on('error', (err) => {
+                console.error(`[SEND_INPUT_HELPER] send-input command failed with error:`, err);
+                return reject(err);
             });
         });
     };
@@ -156,7 +195,7 @@ export async function spawnChopupWithScript(
         const outputFile = scriptArgs[0];
         if (!outputFile) throw new Error('Wrapped script output file path not set.');
         try {
-            await new Promise(r => setTimeout(r, 200));
+            await new Promise(r => setTimeout(r, 100));
             return await fs.readFile(outputFile, 'utf-8');
         } catch (e: unknown) {
             if (typeof e === 'object' && e !== null && 'code' in e && e.code === 'ENOENT') {

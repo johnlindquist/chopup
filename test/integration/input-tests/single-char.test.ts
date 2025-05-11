@@ -16,6 +16,7 @@ describe('Single Character Input Test', () => {
     let chopupInstance: ChopupInstance | null = null;
 
     beforeAll(async () => {
+        console.log('[SINGLE_CHAR_TEST] beforeAll: creating outputDir');
         await fs.mkdir(outputDir, { recursive: true });
         try {
             await fs.access(scriptPath, fs.constants.X_OK);
@@ -25,62 +26,80 @@ describe('Single Character Input Test', () => {
     });
 
     afterAll(async () => {
+        console.log('[SINGLE_CHAR_TEST] afterAll: cleaning up chopupInstance');
         if (chopupInstance) {
             await chopupInstance.cleanup();
         }
-        // Optionally clean up logs
-        // await fs.rm(baseLogDir, { recursive: true, force: true });
     });
 
     it('should send "y" and verify "Confirmed: yes" output', async () => {
+        console.log('[SINGLE_CHAR_TEST] Test start: y');
         const testId = 'single_char_y';
         const outputFile = path.join(outputDir, `${testId}_output.txt`);
-        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId);
+        console.log('[SINGLE_CHAR_TEST] Spawning chopupInstance');
+        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId, 5000);
         expect(chopupInstance?.socketPath).toBeDefined();
 
-        const testInput = 'y\n'; // Send 'y' followed by newline
+        const testInput = 'y\n';
+        console.log('[SINGLE_CHAR_TEST] Sending input: y');
         await chopupInstance.sendInput(testInput);
 
-        // Allow time for script to process and write output
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('[SINGLE_CHAR_TEST] Waiting 200ms for output');
+        await new Promise(resolve => setTimeout(resolve, 200));
 
+        console.log('[SINGLE_CHAR_TEST] Checking output');
         const output = await chopupInstance.getWrappedProcessOutput();
         expect(output.trim()).toBe('Confirmed: yes');
+        console.log('[SINGLE_CHAR_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
-    }, 20000);
+        console.log('[SINGLE_CHAR_TEST] Test end: y');
+    }, 5000);
 
     it('should send "N" and verify "Confirmed: no" output', async () => {
+        console.log('[SINGLE_CHAR_TEST] Test start: N');
         const testId = 'single_char_N';
         const outputFile = path.join(outputDir, `${testId}_output.txt`);
-        // Need a new instance for a new run
         if (chopupInstance) await chopupInstance.cleanup();
-        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId);
+        console.log('[SINGLE_CHAR_TEST] Spawning chopupInstance');
+        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId, 5000);
         expect(chopupInstance?.socketPath).toBeDefined();
 
-        const testInput = 'N\n'; // Send 'N' followed by newline
+        const testInput = 'N\n';
+        console.log('[SINGLE_CHAR_TEST] Sending input: N');
         await chopupInstance.sendInput(testInput);
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('[SINGLE_CHAR_TEST] Waiting 200ms for output');
+        await new Promise(resolve => setTimeout(resolve, 200));
 
+        console.log('[SINGLE_CHAR_TEST] Checking output');
         const output = await chopupInstance.getWrappedProcessOutput();
         expect(output.trim()).toBe('Confirmed: no');
+        console.log('[SINGLE_CHAR_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
-    }, 20000);
+        console.log('[SINGLE_CHAR_TEST] Test end: N');
+    }, 5000);
 
     it('should send invalid input and verify "Invalid input: ..." output', async () => {
+        console.log('[SINGLE_CHAR_TEST] Test start: invalid');
         const testId = 'single_char_invalid';
         const outputFile = path.join(outputDir, `${testId}_output.txt`);
         if (chopupInstance) await chopupInstance.cleanup();
-        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId);
+        console.log('[SINGLE_CHAR_TEST] Spawning chopupInstance');
+        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId, 5000);
         expect(chopupInstance?.socketPath).toBeDefined();
 
         const testInput = 'maybe\n';
+        console.log('[SINGLE_CHAR_TEST] Sending input: maybe');
         await chopupInstance.sendInput(testInput);
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('[SINGLE_CHAR_TEST] Waiting 200ms for output');
+        await new Promise(resolve => setTimeout(resolve, 200));
 
+        console.log('[SINGLE_CHAR_TEST] Checking output');
         const output = await chopupInstance.getWrappedProcessOutput();
         expect(output.trim().startsWith('Invalid input:')).toBe(true);
+        console.log('[SINGLE_CHAR_TEST] Cleaning up chopupInstance');
         await chopupInstance.cleanup();
-    }, 20000);
+        console.log('[SINGLE_CHAR_TEST] Test end: invalid');
+    }, 5000);
 }); 

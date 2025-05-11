@@ -17,6 +17,7 @@ describe('Input Sending Smoke Test', () => {
     let chopupInstance: ChopupInstance | null = null;
 
     beforeAll(async () => {
+        console.log('[SMOKE_TEST] beforeAll: creating outputDir');
         await fs.mkdir(outputDir, { recursive: true });
         try {
             await fs.access(scriptPath, fs.constants.X_OK);
@@ -26,55 +27,63 @@ describe('Input Sending Smoke Test', () => {
     });
 
     afterAll(async () => {
+        console.log('[SMOKE_TEST] afterAll: cleaning up chopupInstance');
         if (chopupInstance) {
             await chopupInstance.cleanup();
         }
-        // Optionally clean up logs
-        // await fs.rm(baseLogDir, { recursive: true, force: true });
     });
 
     it('should successfully send input to a wrapped script and verify its output', async () => {
+        console.log('[SMOKE_TEST] Test start');
         const testId = 'smoke_test';
         const outputFile = path.join(outputDir, `${testId}_output.txt`);
-        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId);
+        console.log('[SMOKE_TEST] Spawning chopupInstance');
+        chopupInstance = await spawnChopupWithScript(scriptPath, [outputFile], testId, 5000);
         expect(chopupInstance).toBeDefined();
         expect(chopupInstance.socketPath).toBeDefined();
         expect(fsSync.existsSync(chopupInstance.socketPath)).toBe(true);
 
-        const testInput = 'hello-smoke-test\n'; // Add newline as stdin is often line-buffered
+        const testInput = 'hello-smoke-test\n';
+        console.log('[SMOKE_TEST] Sending input');
         await chopupInstance.sendInput(testInput);
 
-        // Give the script a moment to process input and write to its output file
-        await new Promise(resolve => setTimeout(resolve, 500));
+        console.log('[SMOKE_TEST] Waiting 200ms for output');
+        await new Promise(resolve => setTimeout(resolve, 200));
 
+        console.log('[SMOKE_TEST] Checking output');
         const output = await chopupInstance.getWrappedProcessOutput();
         expect(output).toBe(testInput);
 
-        // Verify cleanup by trying to send input again (should fail if process is gone)
-        // and checking if socket file is removed (though chopup should do this on exit)
-        await chopupInstance.cleanup(); // Explicitly call cleanup
+        console.log('[SMOKE_TEST] Cleaning up chopupInstance');
+        await chopupInstance.cleanup();
 
-        // Check if socket is gone - chopup cleans this on exit
-        // It might take a moment for the OS to release the file handle
-        await new Promise(resolve => setTimeout(resolve, 200));
-        expect(fsSync.existsSync(chopupInstance.socketPath)).toBe(false);
+        let socketGone = false;
+        for (let i = 0; i < 10; i++) {
+            console.log(`[SMOKE_TEST] Checking if socket exists (attempt ${i + 1}):`, chopupInstance.socketPath, fsSync.existsSync(chopupInstance.socketPath));
+            if (!fsSync.existsSync(chopupInstance.socketPath)) {
+                socketGone = true;
+                console.log(`[SMOKE_TEST] Socket gone after ${i + 1} attempts.`);
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        console.log(`[SMOKE_TEST] Final socketGone: ${socketGone}, exists: ${fsSync.existsSync(chopupInstance.socketPath)}`);
+        expect(socketGone).toBe(true);
 
-        // Attempting to send input again should ideally fail if the process is truly gone
         try {
+            console.log('[SMOKE_TEST] Attempting to send input after cleanup');
             await chopupInstance.sendInput("after-cleanup");
-            // If it doesn't throw, fail the test, as we expect an error after cleanup
             throw new Error("sendInput after cleanup should have failed but did not.");
         } catch (error: unknown) {
             if (error instanceof Error) {
-                // Expect either the helper's own error or a connection error from the CLI
                 const message = error.message.toLowerCase();
                 const isProcessNotRunningError = message.includes('chopup process is not running');
                 const isConnectionError = message.includes('connect enoent') || message.includes('econnrefused');
                 expect(isProcessNotRunningError || isConnectionError).toBe(true);
             } else {
-                // If it's not an Error instance, fail the test
                 throw new Error('Caught an unknown error type during cleanup check.');
             }
         }
-    }, 20000); // 20s timeout for this test
+        console.log('[SMOKE_TEST] Test end');
+    }, 5000);
 }); 
