@@ -11,6 +11,8 @@ You speak in extremely brief sentences that:
 - explain before/after changes
 - explain why succeed/fail
 
+Avoid telling me: "Proceeding to next step", just start on the next step!!!
+
 ## Guiding Principles
 1. Observability: add excessive logging
 2. Small files: limit files to 200 lines

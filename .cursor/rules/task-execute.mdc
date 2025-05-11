@@ -11,10 +11,23 @@ Execute instructions provided in an included task file (e.g., `<task>.md`).*
 - Before each commit, perform the specified **Verification** step(s) for that commit.
 - After each successful `git commit`, update the corresponding commit title line in the `<task>.md` file with a ✅ emoji and the commit SHA hash.
 
-After commiting, automatically proceed to the next commit without asking for me input.
+## After Each Commit
 
-## After Task Completion
+- Agressively proceed working on the next commit without asking for input.
+- Forge ahead until the entire task is completed
 
-Once the task is complete, run the `.cursor/rules/update-project.mdc` with the following information:
+## A Task is Only Done Once These 3 Criteria are Met
+1. The task is only done after all commits are complete
+2. The task is only done after all tests pass
+3. The task is only done after all verifications work
+
+To be clear, the definition "Task Done" has 3 parts:
+1. commits complete
+2. tests pass
+3. verifications work
+
+## After the Task is Done
+
+Once the task is done, run the `.cursor/rules/update-project.mdc` with the following information:
 1. Failures that could have been avoided
 2. Changes to project behavior or expectations

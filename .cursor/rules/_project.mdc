@@ -3,24 +3,24 @@ description:
 globs: 
 alwaysApply: true
 ---
-# spawn-wrapper - Project Rules
+# chopup - Project Rules
 
 ## 1. Project Overview
 
-goal: CLI tool to wrap long-running processes, segment their logs, and send input to them, all managed via IPC. It also aims to monitor files for changes to trigger log chopping (future feature).
+goal: CLI tool to wrap long-running processes, segment their logs, and send input to them, all managed via IPC. Also monitors files for changes to trigger log chopping (future feature).
 type: CLI Tool
 key features:
 - Wraps and runs any user-specified command using the `run` subcommand (default).
 - Captures stdout and stderr from the wrapped process.
 - Segments/chops logs into new files in a specified log directory on IPC request (`request-logs` command).
-- Allows sending input strings to the stdin of the wrapped process via IPC (`send-input` command).
+- Allows sending input strings to the stdin of the wrapped process via IPC (`send-input` command and `--send` flag).
 - Graceful shutdown using `tree-kill` for robust process tree cleanup.
-- IPC server (using Node.js `net` module via Unix domain sockets) for on-demand log chopping and input sending.
-- (Planned) Monitors a specified file or directory for changes (add, change, unlink) to trigger log chopping.
+- IPC server (Node.js `net` module via Unix domain sockets) for on-demand log chopping and input sending.
+- (Planned) Monitors a specified file or directory for changes to trigger log chopping.
 
 ## 2. Technology Stack
 
-language(s): TypeScript ^5.8.3 (target: es2016, module: commonjs, strict: true)
+language(s): TypeScript ^5.8.3 (strict mode, target: es2016, module: commonjs)
 framework(s): None (CLI, not web)
 ui library/styling: N/A
 database(s): N/A
@@ -28,7 +28,7 @@ state management: N/A
 api layer: N/A (IPC via Node.js `net` module)
 key libraries:
 - commander (CLI parsing)
-- chokidar (File watching - planned for future use)
+- chokidar (File watching - planned)
 - tree-kill (Process tree cleanup)
 - vitest (Testing)
 - tsx (Development execution of TypeScript)
@@ -41,18 +41,21 @@ core directories:
 - src/: Main TypeScript source (index.ts)
 - dist/: Compiled JavaScript output
 - test/integration/: Integration tests (Vitest)
+- test/integration/input-tests/: Input scenario integration tests
+- test/integration/input-tests/fixtures/scripts/: Dummy CLI scripts for input tests
+- test/integration/test-utils/: Test helpers (e.g., input-helpers.ts)
 - tmp/: Temporary files generated during tests (e.g., test scripts, logs)
 - docs/tasks/: Task breakdown files
 diagram/link: N/A
 
 ## 4. Coding Standards & Conventions
 
-language usage: Strict TypeScript (strict mode enabled in tsconfig), async/await, use `node:` prefixed imports for built-in modules. Avoid `any` where possible. Consider optional chaining (`?.`) for cleaner property access on potentially null/undefined objects.
+language usage: Strict TypeScript (strict mode enabled), async/await, use `node:` prefixed imports for built-in modules. Avoid `any`. Use optional chaining (`?.`) for cleaner property access.
 naming conventions:
 - files/folders: kebab-case (e.g., `src/my-module.ts`, `docs/tasks/`)
-- variables/functions: camelCase (e.g., `myVariable`, `calculateValue`)
-- types/interfaces: PascalCase (e.g., `LogBufferEntry`, `IpcOptions`)
-code style/formatting: @biomejs/biome (configured via `biome.json` if present, or CLI arguments in `package.json` scripts). Use `pnpm format`.
+- variables/functions: camelCase
+- types/interfaces: PascalCase (e.g., `LogBufferEntry`, `ChopupInstance`)
+code style/formatting: @biomejs/biome (configured via CLI or package.json scripts). Use `pnpm format`.
 comments: English. JSDoc for public APIs and complex types/functions. Use `TODO:` for pending work.
 imports: Grouped (Node.js built-in, external/npm packages, internal project modules).
 
@@ -67,27 +70,18 @@ imports: Grouped (Node.js built-in, external/npm packages, internal project modu
 ## 6. Testing
 
 framework: Vitest
-types: Integration tests for CLI subcommands (`run`, `request-logs`, `send-input`), IPC communication, log chopping, input sending, and process lifecycle management.
-location: `test/integration/`
-notes: Tests should verify command execution, IPC interactions (including success and error cases), log file creation and content, and ensure proper cleanup of all processes and temporary files (e.g., IPC sockets).
+types: Integration tests for CLI subcommands (`run`, `request-logs`, `send-input`), IPC communication, log chopping, input sending, and process lifecycle management. Input scenario tests cover single-char, multi-char, empty, and edge-case inputs.
+location: `test/integration/` (main), `test/integration/input-tests/` (input scenarios), `test/integration/test-utils/` (helpers)
 
 ## 7. Tooling & Workflow
 
-package manager: pnpm (version specified in `package.json`'s `packageManager` field, e.g., pnpm@10.10.0)
+package manager: pnpm (see `packageManager` in package.json)
 build command(s): `pnpm build` (runs `tsc`)
 run command(s):
-  - Main application (wrapping a command):
-    - `pnpm dev -- run -- <command_to_wrap...>` (development with tsx)
-    - `pnpm start -- run -- <command_to_wrap...>` (production with node)
-    - `node dist/index.js run -- <command_to_wrap...>` (production direct)
-    - `chopup run -- <command_to_wrap...>` (if globally installed or via npx)
-  - Requesting logs:
-    - `pnpm dev -- request-logs --socket <socket-path>`
-    - `chopup request-logs --socket <socket-path>`
-  - Sending input:
-    - `pnpm dev -- send-input --socket <socket-path> --input "<string>"`
-    - `chopup send-input --socket <socket-path> --input "<string>"`
-version control: Git. Recommended commit message convention: Conventional Commits (e.g., `feat:`, `fix:`, `docs:`, `chore:`).
+  - Main application: `pnpm dev -- run -- <command_to_wrap...>`, `pnpm start -- run -- <command_to_wrap...>`, `node dist/index.js run -- <command_to_wrap...>`, `chopup run -- <command_to_wrap...>`
+  - Requesting logs: `pnpm dev -- request-logs --socket <socket-path>`, `chopup request-logs --socket <socket-path>`
+  - Sending input: `pnpm dev -- send-input --socket <socket-path> --input "<string>"`, `chopup send-input --socket <socket-path> --input "<string>"`, `--send` flag
+version control: Git. Conventional Commits required (e.g., `feat:`, `fix:`, `chore:`). Never push failing tests.
 ci/cd: N/A (as of now)
 
 ## 8. (Optional) Database / API Guidelines
@@ -97,10 +91,11 @@ N/A (No database or traditional web API)
 ## 9. (Optional) Specific Feature Rules
 
 - Log Chopping: Logs are chopped on `request-logs` IPC command. Each chop includes logs since the last chop time. A final chop occurs on graceful process exit.
-- Input Sending: Input is sent to the wrapped process's stdin via the `send-input` IPC command. The command takes the target IPC socket and the input string.
+- Input Sending: Input is sent to the wrapped process's stdin via the `send-input` IPC command or `--send` flag. The command takes the target IPC socket and the input string. Tests cover single-char, multi-char, empty, and edge-case inputs.
 - IPC: Communication between `chopup` instances (main `run` and client commands like `request-logs`, `send-input`) happens over a Unix domain socket. The `run` command prints its socket path on startup.
 - CLI Structure: The tool uses subcommands (`run`, `request-logs`, `send-input`). `run` is the default command.
-- Process Cleanup: `tree-kill` is critical. It's used in the main `run` command's shutdown logic and should be used in test teardowns to ensure no orphaned processes.
+- Process Cleanup: `tree-kill` is critical. It's used in the main `run` command's shutdown logic and in test teardowns to ensure no orphaned processes.
+- Integration Test Observability: All dummy scripts and helpers log key events. Tests verify process cleanup, log file creation, and correct input handling.
 
 ## 10. (Optional) Rule Referencing
 

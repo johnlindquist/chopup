@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Log Node, pnpm, npm versions
+        run: |
+          node -v
+          pnpm -v
+          npm -v
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --strict-peer-dependencies
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run tests (vitest)
+        run: pnpm run test:ci || pnpm run test
+
+      - name: List dist contents
+        run: ls -l dist || echo 'dist missing'
+
+  cross-platform:
+    needs: build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --prod --frozen-lockfile
+      - name: List dist contents
+        run: ls -l dist || echo 'dist missing'
+      - name: Run smoke test (echo)
+        run: echo "Smoke test on ${{ runner.os }}"

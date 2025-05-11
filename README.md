@@ -101,6 +101,13 @@ Use the `send-input` command:
 chopup send-input --socket <socket-path> --input "<string-to-send>"
 ```
 
+**Log Suppression Note:**
+- When running `send-input`, only the following will be printed to stdout:
+  - `INPUT_SENT` (on success)
+  - `INPUT_SEND_ERROR` or `INPUT_SEND_ERROR_NO_CHILD` (on failure)
+- All other debug/info logs are suppressed for this command to ensure clean output for integration tests and scripting.
+- Connection errors (e.g., invalid socket, exited process) are printed to stderr.
+
 **Example:**
 
 Imagine `my-interactive-app.js` (from step 1) prompts "Are you sure? (y/n): ".
@@ -116,7 +123,7 @@ chopup send-input --socket /tmp/chopup_12345.sock --input "y\n"
 **What happens:**
 - Connects to the `chopup run` instance via IPC.
 - Sends the specified string to the stdin of the process `chopup` is wrapping.
-- The `send-input` command will print a confirmation (e.g., `INPUT_SENT`) or an error message.
+- The `send-input` command will print a confirmation (e.g., `INPUT_SENT`) or an error message. No other logs will be printed.
 
 ---
 
@@ -178,6 +185,7 @@ pnpm start -- send-input --socket <socket-path> --input "<string-to-send>"
   - Ensure you are using the correct IPC socket path from the running `chopup run` instance's output.
   - Verify the `chopup run` instance is still running.
   - Ensure the wrapped application is actually waiting for stdin if you are using `send-input`.
+  - **Note:** For `send-input`, only `INPUT_SENT`, `INPUT_SEND_ERROR`, or `INPUT_SEND_ERROR_NO_CHILD` will be printed to stdout. Connection errors will be printed to stderr. All other logs are suppressed for this command.
 - **Log files not appearing:** Check permissions on the log directory and that the `chopup run` process has not exited before logs could be written.
 - **Process cleanup:** All child processes are killed on exit. If not, use `tree-kill` or manually clean up.
 
@@ -194,3 +202,26 @@ pnpm start -- send-input --socket <socket-path> --input "<string-to-send>"
 
 ## License
 ISC 
+
+## CI/CD & Release
+
+![CI](https://github.com/johnlindquist/spawn-wrapper/actions/workflows/ci.yml/badge.svg)
+![Release](https://github.com/johnlindquist/spawn-wrapper/actions/workflows/release.yml/badge.svg)
+
+- All PRs and pushes run CI (build, test, cross-platform smoke test).
+- Merges to `main` trigger semantic-release:
+  - Version bump, changelog, and npm publish (public).
+  - Requires `NPM_TOKEN` secret in repo settings.
+  - Uses [Conventional Commits](https://www.conventionalcommits.org/) for changelog and versioning.
+- Excessive logging is enabled in CI and release for observability.
+
+### Local Release Test
+
+```sh
+pnpm run release --dry-run
+```
+
+### NPM Publish
+
+- Set `NPM_TOKEN` in GitHub repo secrets for publish to work.
+- `publishConfig.access` is set to `public` in package.json. 

@@ -1,0 +1,70 @@
+name: Release Package
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  release:
+    name: Create Release and Publish NPM Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Log Node, pnpm, npm versions
+        run: |
+          node -v
+          pnpm -v
+          npm -v
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build project (Pre-Release Check)
+        run: pnpm run build
+
+      - name: Run semantic-release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Build project (Post-Release Version)
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: pnpm run build
+
+      - name: Publish to NPM
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Output Publish Status (Published)
+        if: steps.semantic.outputs.new_release_published == 'true'
+        run: echo "✅ New version ${{ steps.semantic.outputs.new_release_version }} tagged, released on GitHub, and published to npm."
+
+      - name: Output Publish Status (Not Published)
+        if: steps.semantic.outputs.new_release_published != 'true'
+        run: echo "ℹ️ No new version published."

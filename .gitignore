@@ -136,3 +136,7 @@ dist
 .pnp.*
 
 tmp
+
+# GitHub Actions workflows (do NOT ignore these)
+!.github/
+!.github/workflows/
