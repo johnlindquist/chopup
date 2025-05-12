@@ -1,6 +1,6 @@
 # Task: Rewrite Test Suite for Robustness & Maintainability
 
-## Commit 1: chore: Remove legacy tests and scaffold clean structure
+## Commit 1: chore: Remove legacy tests and scaffold clean structure ✅ 2712118
 
 **Description:**
 
@@ -60,7 +60,7 @@
   * Instantiate `new Chopup("echo", ["ok"], "/tmp/logs", "mock.sock")` **with** mocked IPC + fake child.
   * Assert `chopLog()` creates a file in `logDir` and resets internal buffer.
   * Assert `send-input` handler writes to fake child `stdin` and pushes `CHOPUP_INPUT_SENT` back.
-* Mock `fs.promises.writeFile` with Vitest’s `vi.spy` to keep tests in‑memory.
+* Mock `fs.promises.writeFile` with Vitest's `vi.spy` to keep tests in‑memory.
 
 **Verification:**
 
@@ -104,7 +104,7 @@
   * explains unit vs integration philosophy,
   * how to run subsets (`pnpm test:unit`, `pnpm test:integration`),
   * guidance on writing deterministic tests (use mocks first, real processes sparingly).
-* **Update** README → “Development” section to reference new commands.
+* **Update** README → "Development" section to reference new commands.
 * **Amend** `.github/workflows/ci.yml`:
 
   * cache Vitest, run `pnpm test:unit` then `pnpm test:integration` sequentially.
