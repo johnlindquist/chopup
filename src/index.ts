@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 
-import { program } from "commander";
-import path from "node:path";
-import chokidar from "chokidar";
-import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
+import path from "node:path";
+import chokidar from "chokidar";
+import { program } from "commander";
 import type { Command as CommanderCommand } from "commander";
 
 import {
 	Chopup,
-	INPUT_SENT,
-	INPUT_SEND_ERROR,
-	INPUT_SEND_ERROR_NO_CHILD,
-	INPUT_SEND_ERROR_BACKPRESSURE,
 	type ChopupOptions,
+	INPUT_SEND_ERROR,
+	INPUT_SEND_ERROR_BACKPRESSURE,
+	INPUT_SEND_ERROR_NO_CHILD,
+	INPUT_SENT,
 } from "./chopup";
 
 let effectiveArgv = process.argv;

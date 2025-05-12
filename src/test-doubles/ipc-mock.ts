@@ -108,8 +108,8 @@ export class MockDuplex extends Duplex {
 
 	// Mock properties
 	isTTY?: boolean | undefined = false;
-	bytesRead: number = 0;
-	bytesWritten: number = 0;
+	bytesRead = 0;
+	bytesWritten = 0;
 	// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 	// @ts-ignore : This is a mock property
 	remoteAddress?: string;
