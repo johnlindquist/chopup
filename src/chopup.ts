@@ -218,7 +218,7 @@ export class Chopup {
                     try {
                         commandData = JSON.parse(message);
                     } catch (error) {
-                        this.logToConsole('IPC_PARSE_ERROR\n', 'error');
+                        this.logToConsole('IPC_PARSE_ERROR\n', 'stderr');
                         await this.writeToSocket(socket, 'IPC_PARSE_ERROR'); // Await write
                         return; // Stop processing this data chunk
                     }
@@ -237,29 +237,29 @@ export class Chopup {
                             if (this.childProcess && this.childProcess.stdin) {
                                 const writeSuccess = this.childProcess.stdin.write(commandData.input + '\n', (err) => {
                                     if (err) {
-                                        this.logToConsole(`[ERROR_IPC_HANDLER] Error writing to child stdin: ${err.message}\n`, 'error');
+                                        this.logToConsole(`[ERROR_IPC_HANDLER] Error writing to child stdin: ${err.message}\n`, 'stderr');
                                         // Try to inform client even if stdin write failed
-                                        this.writeToSocket(socket, INPUT_SEND_ERROR).catch(e => this.logToConsole(`Error sending INPUT_SEND_ERROR to client: ${e}`, 'error'));
+                                        this.writeToSocket(socket, INPUT_SEND_ERROR).catch(e => this.logToConsole(`Error sending INPUT_SEND_ERROR to client: ${(e as Error).message}`, 'stderr'));
                                     } else {
                                         this.logToConsole(`[DEBUG_IPC_HANDLER] Successfully wrote to child stdin.`);
                                         // Only send success if write callback confirms no error
-                                        this.writeToSocket(socket, INPUT_SENT).catch(e => this.logToConsole(`Error sending INPUT_SENT to client: ${e}`, 'error'));
+                                        this.writeToSocket(socket, INPUT_SENT).catch(e => this.logToConsole(`Error sending INPUT_SENT to client: ${(e as Error).message}`, 'stderr'));
                                     }
                                 });
                                 if (!writeSuccess) {
-                                    this.logToConsole('[WARN_IPC_HANDLER] Child stdin buffer full, write failed synchronously.\n', 'error');
+                                    this.logToConsole('[WARN_IPC_HANDLER] Child stdin buffer full, write failed synchronously.\n', 'stderr');
                                     // Inform client about synchronous failure
                                     await this.writeToSocket(socket, INPUT_SEND_ERROR); // Await write
                                 }
                                 // Response (INPUT_SENT or INPUT_SEND_ERROR) is now sent within the write callback or after sync failure check
                             } else {
-                                this.logToConsole('[ERROR_IPC_HANDLER] Cannot send input: Child process or stdin not available.\n', 'error');
+                                this.logToConsole('[ERROR_IPC_HANDLER] Cannot send input: Child process or stdin not available.\n', 'stderr');
                                 await this.writeToSocket(socket, INPUT_SEND_ERROR_NO_CHILD); // Await write
                             }
                             break;
 
                         default:
-                            this.logToConsole(`[WARN_IPC_HANDLER] Received unknown command: ${commandData.command}\n`, 'error');
+                            this.logToConsole(`[WARN_IPC_HANDLER] Received unknown command: ${commandData.command}\n`, 'stderr');
                             await this.writeToSocket(socket, 'UNKNOWN_COMMAND'); // Await write
                     }
                 } catch (e: unknown) {
@@ -669,7 +669,7 @@ export class Chopup {
             this.logToConsole(`[DEBUG_IPC_SERVER] Attempting to write ${message}`);
             socket.write(message, (err) => {
                 if (err) {
-                    this.logToConsole(`[ERROR_IPC_SERVER] Error writing to socket: ${err.message}\n`, 'error');
+                    this.logToConsole(`[ERROR_IPC_SERVER] Error writing to socket: ${err.message}\n`, 'stderr');
                     reject(err);
                 } else {
                     this.logToConsole(`[DEBUG_IPC_SERVER] Successfully wrote ${message}`);
