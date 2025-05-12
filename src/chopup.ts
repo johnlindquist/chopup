@@ -712,6 +712,8 @@ export class Chopup {
 				this.childProcess = this.spawnFn(cmd, args, {
 					stdio: ["pipe", "pipe", "pipe"],
 					env: { ...process.env },
+					detached: false, // Ensure child is not detached for easier cleanup
+					shell: false // Avoid spawning through shell unless necessary
 				});
 
 				this.log(
@@ -762,7 +764,6 @@ export class Chopup {
 						`Child process started with PID: ${this.childProcess.pid}, IPC Socket: ${this.socketPath}`,
 					);
 				} else {
-					// biome-ignore lint/complexity/useOptionalChain: <explanation>
 					console.error(
 						`Child process failed to start. Socket: ${this.socketPath}`,
 					);
