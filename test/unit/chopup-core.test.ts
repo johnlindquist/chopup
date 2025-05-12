@@ -4,10 +4,12 @@ import { Chopup, LOGS_CHOPPED, SEND_INPUT_COMMAND, REQUEST_LOGS_COMMAND, INPUT_S
 import type { SpawnFunction, ChopupOptions, NetServerConstructor, LogBufferEntry } from '../../src/chopup';
 import net from 'node:net'; // Import real net module
 import fs from 'node:fs/promises';
-import fsSync, { type PathLike, type MakeDirectoryOptions, type Mode } from 'node:fs'; // Consolidate fsSync imports
+import fsSync, { type PathLike, type MakeDirectoryOptions, type Mode, type WriteFileOptions } from 'node:fs'; // Consolidate fsSync imports and add WriteFileOptions
 import path from 'node:path'; // Import path for socket path
 import { EventEmitter } from 'node:events'; // Added node: prefix
 import treeKill from 'tree-kill'; // Import tree-kill
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { WriteFileOptions as NodeFsWriteFileOptions } from "node:fs"; // Import WriteFileOptions from node:fs
 
 // Mock tree-kill globally for this test file
 vi.mock('tree-kill', () => {
@@ -24,7 +26,8 @@ const getTestSocketPath = () => path.join(TEST_SOCKET_DIR, `test-core-${Date.now
 const TEST_LOG_DIR = path.join(__dirname, '../../../tmp/unit-core-logs');
 
 // Add explicit Mock types for spies, using SpyInstance for broader compatibility
-let writeFileSpy: SpyInstance<[file: PathLike | fs.FileHandle, data: string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView>, options?: fs.WriteFileOptions | undefined], Promise<void>>;
+// Update signature to match fs.promises.writeFile accurately, including Stream type
+let writeFileSpy: SpyInstance<[file: PathLike | fs.FileHandle, data: string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView> | import('node:stream').Stream, options?: WriteFileOptions | undefined], Promise<void>>;
 let mkdirSpy: SpyInstance<[path: PathLike, options?: Mode | (MakeDirectoryOptions & { recursive?: boolean | undefined; }) | null | undefined], string | undefined>;
 let unlinkSyncSpy: SpyInstance<[path: PathLike], void>;
 
@@ -122,8 +125,9 @@ describe('Chopup core logic', () => {
                 });
                 console.log(`[TEST_CORE_CLIENT] Connected successfully to ${socketPath} on attempt ${i + 1}`);
                 return currentClient!;
-            } catch (err: any) {
-                console.warn(`[TEST_CORE_CLIENT] Connection attempt ${i + 1} to ${socketPath} failed: ${err.message}. Retrying in ${delay}ms...`);
+            } catch (err: unknown) {
+                const error = err as Error;
+                console.warn(`[TEST_CORE_CLIENT] Connection attempt ${i + 1} to ${socketPath} failed: ${error.message}. Retrying in ${delay}ms...`);
                 if (i === retries - 1) {
                     console.error(`[TEST_CORE_CLIENT] All ${retries} connection attempts to ${socketPath} failed.`);
                     throw err; // Re-throw last error if all retries fail
@@ -174,10 +178,10 @@ describe('Chopup core logic', () => {
             // @ts-expect-error Accessing private member
             const server = chopup.ipcServer;
             // @ts-expect-error Accessing private member
-            const child = chopup.childProcess;
+            let child = chopup.childProcess; // Made mutable for potential nulling
 
             // Try graceful shutdown first
-            if (server && server.listening) {
+            if (server?.listening) { // Used optional chaining
                 console.log(`[TEST_CLEANUP_CORE] Closing IPC server for ${currentTestSocketPath}`);
                 await new Promise<void>((resolve, reject) => {
                     server.close((err) => {
@@ -195,12 +199,16 @@ describe('Chopup core logic', () => {
             chopup.ipcServer = null; // Nullify server reference
 
             // Terminate child process if it exists and wasn't cleaned up by server close
-            if (child && child.pid && currentFakeChild && !currentFakeChild.killed) {
+            if (child?.pid && currentFakeChild && !currentFakeChild.killed) { // Used optional chaining
                 console.log(`[TEST_CLEANUP_CORE] Killing fake child PID ${child.pid} for ${currentTestSocketPath}`);
                 // Use treeKill mock if available, otherwise direct kill
                 const treeKillMock = vi.mocked(treeKill);
                 if (treeKillMock) {
-                    await new Promise<void>(resolve => treeKillMock(child.pid!, 'SIGTERM', resolve));
+                    await new Promise<void>((resolveTreeKill, rejectTreeKill) => { // Renamed resolve to avoid conflict
+                        treeKillMock(child!.pid, 'SIGTERM', (err: Error | undefined) => { // Added err type, kept non-null for pid as it's checked
+                            if (err) rejectTreeKill(err); else resolveTreeKill();
+                        });
+                    });
                 } else {
                     child.kill('SIGTERM'); // Fallback
                 }
@@ -248,18 +256,23 @@ describe('Chopup core logic', () => {
     // Skip these tests as they are proving unreliable with real `net` module in this specific test setup.
     // IPC functionality is covered by other tests (mocked unit tests, integration tests).
     it.skip('send-input handler writes to child stdin and responds', async () => {
+        if (!chopup) throw new Error("Chopup instance not initialized"); // Null check
         expect(chopup).toBeDefined();
-        const runPromise = chopup!.run(); // Start run but don't await its completion yet
+        const runPromise = chopup.run(); // Removed non-null assertion
         // @ts-expect-error Accessing private promise for test sync
-        await chopup!.serverReadyPromise; // Ensure server is listening before client connects
+        await chopup.serverReadyPromise; // Kept non-null: chopup is checked
         await new Promise(resolve => setTimeout(resolve, 50)); // Increased delay slightly
 
         currentClient = await connectClientWithRetries(currentTestSocketPath);
         await new Promise<void>((resolve, reject) => {
             // Add a timeout for connection
             const timer = setTimeout(() => reject(new Error('[TEST_CORE_CLIENT] Connection timed out (send-input)')), 5000);
-            currentClient?.once('connect', () => { clearTimeout(timer); resolve(); });
-            currentClient?.once('error', (err) => {
+            if (!currentClient) { // Null check for currentClient
+                clearTimeout(timer);
+                return reject(new Error("currentClient is null before 'connect' event"));
+            }
+            currentClient.once('connect', () => { clearTimeout(timer); resolve(); });
+            currentClient.once('error', (err) => {
                 clearTimeout(timer);
                 console.error('[TEST_CORE_CLIENT_CONNECT_ERROR send-input]', err);
                 reject(err);
@@ -269,13 +282,17 @@ describe('Chopup core logic', () => {
         const responsePromise = new Promise<string>((resolve, reject) => {
             console.log('[TEST_CORE_CLIENT_LISTEN send-input]');
             const timer = setTimeout(() => reject(new Error('[TEST_CORE_CLIENT] Response timed out (send-input)')), 10000); // Shorter timeout
-            currentClient?.once('data', data => {
+            if (!currentClient) { // Null check for currentClient
+                clearTimeout(timer);
+                return reject(new Error("currentClient is null before 'data' event"));
+            }
+            currentClient.once('data', data => {
                 clearTimeout(timer);
                 const responseData = data.toString();
                 console.log(`[TEST_CORE_CLIENT_DATA send-input]: ${responseData}`);
                 resolve(responseData);
             });
-            currentClient?.once('error', err => {
+            currentClient.once('error', err => {
                 clearTimeout(timer);
                 console.error(`[TEST_CORE_CLIENT_ERROR send-input]: ${err}`);
                 reject(err);
@@ -283,7 +300,10 @@ describe('Chopup core logic', () => {
         });
 
         await new Promise<void>((resolveWrite, rejectWrite) => {
-            currentClient?.write(JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'abc' }), (err) => {
+            if (!currentClient) { // Null check for currentClient
+                 return rejectWrite(new Error("currentClient is null before write"));
+            }
+            currentClient.write(JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'abc' }), (err) => {
                 if (err) {
                     console.error('[TEST_CORE_CLIENT_WRITE_ERROR send-input]:', err);
                     return rejectWrite(err);
@@ -309,10 +329,11 @@ describe('Chopup core logic', () => {
     }, 15000); // Adjusted test timeout
 
     it.skip('request-logs command triggers chopLog and responds', async () => {
+        if (!chopup) throw new Error("Chopup instance not initialized"); // Null check
         expect(chopup).toBeDefined();
-        const runPromise = chopup!.run(); // Start run
+        const runPromise = chopup.run(); // Removed non-null assertion
         // @ts-expect-error Accessing private promise for test sync
-        await chopup!.serverReadyPromise; // Ensure server is listening
+        await chopup.serverReadyPromise; // Kept non-null
         await new Promise(resolve => setTimeout(resolve, 50)); // Increased delay slightly
 
         // @ts-expect-error Accessing private member for testing setup
@@ -321,8 +342,12 @@ describe('Chopup core logic', () => {
         currentClient = await connectClientWithRetries(currentTestSocketPath);
         await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error('[TEST_CORE_CLIENT] Connection timed out (request-logs)')), 5000);
-            currentClient?.once('connect', () => { clearTimeout(timer); resolve(); });
-            currentClient?.once('error', (err) => {
+            if (!currentClient) { // Null check for currentClient
+                clearTimeout(timer);
+                return reject(new Error("currentClient is null before 'connect' event"));
+            }
+            currentClient.once('connect', () => { clearTimeout(timer); resolve(); });
+            currentClient.once('error', (err) => {
                 clearTimeout(timer);
                 console.error('[TEST_CORE_CLIENT_CONNECT_ERROR request-logs]:', err);
                 reject(err);
@@ -332,13 +357,17 @@ describe('Chopup core logic', () => {
         const responsePromise = new Promise<string>((resolve, reject) => {
             console.log('[TEST_CORE_CLIENT_LISTEN request-logs]');
             const timer = setTimeout(() => reject(new Error('[TEST_CORE_CLIENT] Response timed out (request-logs)')), 5000);
-            currentClient?.once('data', data => {
+            if (!currentClient) { // Null check for currentClient
+                clearTimeout(timer);
+                return reject(new Error("currentClient is null before 'data' event"));
+            }
+            currentClient.once('data', data => {
                 clearTimeout(timer);
                 const responseData = data.toString();
                 console.log(`[TEST_CORE_CLIENT_DATA request-logs]: ${responseData}`);
                 resolve(responseData);
             });
-            currentClient?.once('error', err => {
+            currentClient.once('error', err => {
                 clearTimeout(timer);
                 console.error(`[TEST_CORE_CLIENT_ERROR request-logs]: ${err}`);
                 reject(err);
@@ -346,7 +375,10 @@ describe('Chopup core logic', () => {
         });
 
         await new Promise<void>((resolveWrite, rejectWrite) => {
-            currentClient?.write(JSON.stringify({ command: REQUEST_LOGS_COMMAND }), (err) => {
+            if (!currentClient) { // Null check for currentClient
+                 return rejectWrite(new Error("currentClient is null before write"));
+            }
+            currentClient.write(JSON.stringify({ command: REQUEST_LOGS_COMMAND }), (err) => {
                 if (err) {
                     console.error('[TEST_CORE_CLIENT_WRITE_ERROR request-logs]:', err);
                     return rejectWrite(err);
@@ -372,10 +404,11 @@ describe('Chopup core logic', () => {
     }, 10000); // Adjusted test timeout
 
     it.skip('send-input returns error if no child process', async () => {
+        if (!chopup) throw new Error("Chopup instance not initialized"); // Null check
         expect(chopup).toBeDefined();
-        const runPromise = chopup!.run(); // Start run
+        const runPromise = chopup.run(); // Removed non-null assertion
         // @ts-expect-error Accessing private promise for test sync
-        await chopup!.serverReadyPromise; // Ensure server is listening
+        await chopup.serverReadyPromise; // Kept non-null
         await new Promise(resolve => setTimeout(resolve, 50)); // Increased delay slightly
 
         // @ts-expect-error Simulate no child process
@@ -384,8 +417,12 @@ describe('Chopup core logic', () => {
         currentClient = await connectClientWithRetries(currentTestSocketPath);
         await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error('[TEST_CORE_CLIENT] Connection timed out (send-input-no-child)')), 5000);
-            currentClient?.once('connect', () => { clearTimeout(timer); resolve(); });
-            currentClient?.once('error', (err) => {
+            if (!currentClient) { // Null check for currentClient
+                clearTimeout(timer);
+                return reject(new Error("currentClient is null before 'connect' event"));
+            }
+            currentClient.once('connect', () => { clearTimeout(timer); resolve(); });
+            currentClient.once('error', (err) => {
                 clearTimeout(timer);
                 console.error('[TEST_CORE_CLIENT_CONNECT_ERROR send-input-no-child]:', err);
                 reject(err);
@@ -395,13 +432,17 @@ describe('Chopup core logic', () => {
         const responsePromise = new Promise<string>((resolve, reject) => {
             console.log('[TEST_CORE_CLIENT_LISTEN send-input-no-child]');
             const timer = setTimeout(() => reject(new Error('[TEST_CORE_CLIENT] Response timed out (send-input-no-child)')), 5000);
-            currentClient?.once('data', data => {
+            if (!currentClient) { // Null check for currentClient
+                clearTimeout(timer);
+                return reject(new Error("currentClient is null before 'data' event"));
+            }
+            currentClient.once('data', data => {
                 clearTimeout(timer);
                 const responseData = data.toString();
                 console.log(`[TEST_CORE_CLIENT_DATA send-input-no-child]: ${responseData}`);
                 resolve(responseData);
             });
-            currentClient?.once('error', err => {
+            currentClient.once('error', err => {
                 clearTimeout(timer);
                 console.error(`[TEST_CORE_CLIENT_ERROR send-input-no-child]: ${err}`);
                 reject(err);
@@ -409,7 +450,10 @@ describe('Chopup core logic', () => {
         });
 
         await new Promise<void>((resolveWrite, rejectWrite) => {
-            currentClient?.write(JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'abc' }), (err) => {
+            if (!currentClient) { // Null check for currentClient
+                 return rejectWrite(new Error("currentClient is null before write"));
+            }
+            currentClient.write(JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'abc' }), (err) => {
                 if (err) {
                     console.error('[TEST_CORE_CLIENT_WRITE_ERROR send-input-no-child]:', err);
                     return rejectWrite(err);
