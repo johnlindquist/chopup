@@ -87,6 +87,10 @@ describe('Chopup', () => {
     let client: net.Socket | null = null;
     let serverInstance: Chopup | null = null; // Track server instance for cleanup
     let fakeChild: FakeChildProcess | null = null; // Track fake child for cleanup/assertion
+    let mockSpawn: Mock<Parameters<SpawnFunction>, ReturnType<SpawnFunction>>;
+    let mockCreateServer: Mock<Parameters<typeof net.createServer>, ReturnType<typeof net.createServer>>;
+    let mockNetModule: NetServerConstructor; // This is an object with a method, not a mock function itself
+    let mockTreeKill: Mock<Parameters<typeof treeKill>, void>; // treeKill mock doesn't have a specific return type in the mock setup
 
     // Ensure socket and log directories are clean before tests
     beforeAll(async () => {
@@ -121,8 +125,8 @@ describe('Chopup', () => {
         // Close client connection if it exists
         if (client && !client.destroyed) {
             console.log("[TEST_CLEANUP] Closing test client connection.");
-            const closePromise = new Promise<void>(resolve => client!.once('close', resolve)); // Added non-null assertion
-            client!.destroy(); // Force close, added non-null assertion
+            const closePromise = new Promise<void>(resolve => client!.once('close', resolve));
+            client!.destroy(); // Force close
             await closePromise;
             console.log("[TEST_CLEANUP] Test client connection closed.");
             client = null;
@@ -157,6 +161,26 @@ describe('Chopup', () => {
             }
         }
         console.log(`[TEST_CLEANUP] Finished afterEach for socket: ${currentTestSocketPath}`);
+
+        // Cleanup: close server, attempt to remove socket, ensure child killed
+        if (serverInstance) {
+            // Accessing private members for testing cleanup is okay here
+            const server = serverInstance['ipcServer'] as net.Server | undefined;
+            const child = serverInstance['childProcess'] as ChildProcess | null;
+
+            if (server?.listening) { // Use optional chaining instead of non-null assertion
+                console.log(`[TEST_CLEANUP] Closing server instance for socket: ${serverInstance.getSocketPath()}`);
+                await new Promise<void>((resolve, reject) => {
+                    server.close(resolve);
+                });
+            }
+            // @ts-expect-error Accessing private member
+            if (child?.pid && serverInstance['currentFakeChild'] && !serverInstance['currentFakeChild'].killed) { // Use optional chaining
+                console.log(`[TEST_CLEANUP] Killing fake child PID ${child.pid} for socket: ${serverInstance.getSocketPath()}`);
+                // Use treeKill mock if available
+                treeKill(child.pid, 'SIGTERM');
+            }
+        }
     });
 
     // Helper to create instance with mocks and unique socket path
@@ -442,8 +466,7 @@ describe('Chopup', () => {
         beforeEach(async () => {
             const { instance, getMockServerConnectionHandler } = createChopupInstance();
             testChopup = instance;
-            // Initialize the server part (which in Chopup calls net.createServer)
-            // This will set up the mockServerInstance and its connection handler via the spy
+            serverInstance = instance; // Track for afterEach cleanup
             // @ts-expect-error Calling private method for test setup
             testChopup.setupIpcServer();
             const handler = getMockServerConnectionHandler();
@@ -565,14 +588,15 @@ describe('Chopup', () => {
             // Create a dummy socket file first
             fsSync.writeFileSync(currentTestSocketPath, 'dummy');
 
-            const { instance: chopup } = createChopupInstance();
+            const { instance: localChopupInstance } = createChopupInstance();
+            serverInstance = localChopupInstance; // Track for afterEach
 
             // The existsSync mock in createChopupInstance should now correctly use originalExistsSync for the initial check.
             // So, no local override of existsSync is needed here for that part.
             const unlinkSyncSpy = vi.spyOn(fsSync, 'unlinkSync');
 
-            const runPromise = chopup.run();
-            await (chopup as any).serverReadyPromise; // Wait for setup to complete
+            const runPromise = localChopupInstance.run();
+            await (localChopupInstance as any).serverReadyPromise; // Wait for setup to complete
 
             expect(unlinkSyncSpy).toHaveBeenCalledWith(currentTestSocketPath);
 
@@ -586,11 +610,12 @@ describe('Chopup', () => {
         });
 
         it('should perform final cleanup on child process exit', async () => {
-            const { instance: chopup } = createChopupInstance();
+            const { instance: localChopupInstance } = createChopupInstance();
+            serverInstance = localChopupInstance; // Track
             // @ts-expect-error Spying on private method
-            const doCleanupSpy = vi.spyOn(chopup, 'doCleanup');
-            const runPromise = chopup.run();
-            await (chopup as any).serverReadyPromise; // Wait for setup
+            const doCleanupSpy = vi.spyOn(localChopupInstance, 'doCleanup');
+            const runPromise = localChopupInstance.run();
+            await (localChopupInstance as any).serverReadyPromise; // Wait for setup
 
             expect(fakeChild).toBeDefined();
             // Ensure fakeChild exists before non-null assertion
@@ -606,24 +631,25 @@ describe('Chopup', () => {
         });
 
         it('doCleanup should call performFinalCleanup and prevent multiple runs', async () => {
-            const { instance: chopup } = createChopupInstance();
+            const { instance: localChopupInstance } = createChopupInstance();
+            serverInstance = localChopupInstance; // Track
             // @ts-expect-error Spying on private method
-            const performFinalCleanupSpy = vi.spyOn(chopup, 'performFinalCleanup').mockResolvedValue(undefined);
-            await (chopup as any).doCleanup(0, 'SIGINT');
+            const performFinalCleanupSpy = vi.spyOn(localChopupInstance, 'performFinalCleanup').mockResolvedValue(undefined);
+            await (localChopupInstance as any).doCleanup(0, 'SIGINT');
             await vi.runAllTimersAsync(); // Ensure async operations in doCleanup complete
             expect(performFinalCleanupSpy).toHaveBeenCalledTimes(1);
             // @ts-expect-error Accessing private member for test verification
-            expect(chopup.cleanupInitiated).toBe(true);
-            await (chopup as any).doCleanup(0, 'SIGINT');
+            expect(localChopupInstance.cleanupInitiated).toBe(true);
+            await (localChopupInstance as any).doCleanup(0, 'SIGINT');
             await vi.runAllTimersAsync(); // And again
             expect(performFinalCleanupSpy).toHaveBeenCalledTimes(1); // Should not call again
         });
 
         it('initializeSignalHandlers should set up process signal listeners', () => {
             const processOnSpy = vi.spyOn(process, 'on');
-            const { instance: chopup } = createChopupInstance();
+            const { instance: localChopupInstance } = createChopupInstance();
             // @ts-expect-error Calling private method for test
-            chopup.initializeSignalHandlers();
+            localChopupInstance.initializeSignalHandlers();
             expect(processOnSpy).toHaveBeenCalledWith('SIGINT', expect.any(Function));
             expect(processOnSpy).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
             expect(processOnSpy).toHaveBeenCalledWith('exit', expect.any(Function));
@@ -637,39 +663,41 @@ describe('Chopup', () => {
         const MOCK_RECORD_OUTPUT_TIME = 1600000002000;
 
         it('should write logBuffer to file and clear buffer', async () => {
-            const { instance: chopup } = createChopupInstance(['test-cmd', 'arg1', 'arg2']);
+            const { instance: localChopupInstance } = createChopupInstance(['test-cmd', 'arg1', 'arg2']);
+            serverInstance = localChopupInstance; // Track
             const dateNowSpy = vi.spyOn(Date, 'now');
             // @ts-expect-error Accessing private member for test setup
-            (chopup as any).lastChopTime = MOCK_LAST_CHOP_TIME;
-            (chopup as any).logBuffer = [];
+            (localChopupInstance as any).lastChopTime = MOCK_LAST_CHOP_TIME;
+            (localChopupInstance as any).logBuffer = [];
             dateNowSpy.mockReturnValue(MOCK_RECORD_OUTPUT_TIME);
             // @ts-expect-error Calling private method for test
-            (chopup as any).recordOutput(Buffer.from('line1\n'), 'stdout');
+            (localChopupInstance as any).recordOutput(Buffer.from('line1\n'), 'stdout');
             // @ts-expect-error Calling private method for test
-            (chopup as any).recordOutput(Buffer.from('line2\n'), 'stderr');
+            (localChopupInstance as any).recordOutput(Buffer.from('line2\n'), 'stderr');
             dateNowSpy.mockReturnValue(MOCK_CHOP_TIME);
-            await (chopup as any).chopLog();
+            await (localChopupInstance as any).chopLog();
             const expectedFilename = path.join(TEST_LOG_DIR, `test-cmd_arg1_arg2_${MOCK_LAST_CHOP_TIME}_${MOCK_CHOP_TIME}_log`);
             const isoTimestamp = new Date(MOCK_RECORD_OUTPUT_TIME).toISOString();
             const expectedContent = `[${isoTimestamp}] [stdout] line1\n[${isoTimestamp}] [stderr] line2\n`;
             expect(fs.writeFile).toHaveBeenCalledWith(expectedFilename, expectedContent);
-            expect((chopup as any).logBuffer.length).toBe(0);
-            expect((chopup as any).lastChopTime).toBe(MOCK_CHOP_TIME);
+            expect((localChopupInstance as any).logBuffer.length).toBe(0);
+            expect((localChopupInstance as any).lastChopTime).toBe(MOCK_CHOP_TIME);
             dateNowSpy.mockRestore();
         });
 
         it('should handle final chop correctly', async () => {
-            const { instance: chopup } = createChopupInstance(['test-cmd', 'arg1', 'arg2']);
+            const { instance: localChopupInstance } = createChopupInstance(['test-cmd', 'arg1', 'arg2']);
+            serverInstance = localChopupInstance; // Track
             const dateNowSpy = vi.spyOn(Date, 'now');
             // @ts-expect-error Accessing private member for test setup
-            (chopup as any).lastChopTime = MOCK_LAST_CHOP_TIME;
+            (localChopupInstance as any).lastChopTime = MOCK_LAST_CHOP_TIME;
             // @ts-expect-error Accessing private member for test setup
-            (chopup as any).logBuffer = [];
+            (localChopupInstance as any).logBuffer = [];
             dateNowSpy.mockReturnValue(MOCK_RECORD_OUTPUT_TIME);
             // @ts-expect-error Calling private method for test
-            (chopup as any).recordOutput(Buffer.from('final line\n'), 'stdout');
+            (localChopupInstance as any).recordOutput(Buffer.from('final line\n'), 'stdout');
             dateNowSpy.mockReturnValue(MOCK_CHOP_TIME);
-            await (chopup as any).chopLog(true); // finalChop = true
+            await (localChopupInstance as any).chopLog(true); // finalChop = true
             const expectedFilename = path.join(TEST_LOG_DIR, `test-cmd_arg1_arg2_${MOCK_LAST_CHOP_TIME}_${MOCK_CHOP_TIME}_final_log`);
             const isoTimestamp = new Date(MOCK_RECORD_OUTPUT_TIME).toISOString();
             const expectedContent = `[${isoTimestamp}] [stdout] final line\n`;
@@ -678,22 +706,24 @@ describe('Chopup', () => {
         });
 
         it('should not write if logBuffer is empty and not finalChop', async () => {
-            const { instance: chopup } = createChopupInstance();
+            const { instance: localChopupInstance } = createChopupInstance();
+            serverInstance = localChopupInstance; // Track
             (fs.writeFile as Mock).mockClear();
             // @ts-expect-error Accessing private member for test setup
-            (chopup as any).logBuffer = [];
-            await (chopup as any).chopLog(false); // finalChop = false
+            (localChopupInstance as any).logBuffer = [];
+            await (localChopupInstance as any).chopLog(false); // finalChop = false
             expect(fs.writeFile).not.toHaveBeenCalled();
         });
     });
 
     describe('recordOutput', () => {
         it('should add lines to logBuffer with correct timestamp and type', () => {
-            const { instance: chopup } = createChopupInstance();
+            const { instance: localChopupInstance } = createChopupInstance();
+            serverInstance = localChopupInstance; // Track
             const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(1234567890);
-            (chopup as any).recordOutput(Buffer.from('out1\nout2'), 'stdout');
-            (chopup as any).recordOutput(Buffer.from('err1'), 'stderr');
-            const buffer = (chopup as any).logBuffer;
+            (localChopupInstance as any).recordOutput(Buffer.from('out1\nout2'), 'stdout');
+            (localChopupInstance as any).recordOutput(Buffer.from('err1'), 'stderr');
+            const buffer = (localChopupInstance as any).logBuffer;
             expect(buffer.length).toBe(3);
             expect(buffer[0]).toEqual({ timestamp: 1234567890, type: 'stdout', line: 'out1\n' });
             expect(buffer[1]).toEqual({ timestamp: 1234567890, type: 'stdout', line: 'out2\n' });
@@ -705,8 +735,9 @@ describe('Chopup', () => {
     describe('getSocketPath', () => {
         it('should return the correct socket path', () => {
             const customPath = '/tmp/mysock.sock';
-            const { instance: chopup } = createChopupInstance(undefined, undefined, { socketPath: customPath });
-            expect(chopup.getSocketPath()).toBe(customPath);
+            const { instance: localChopupInstance } = createChopupInstance(undefined, undefined, { socketPath: customPath });
+            serverInstance = localChopupInstance; // Track
+            expect(localChopupInstance.getSocketPath()).toBe(customPath);
 
             // Need a different instance for default path test
             vi.restoreAllMocks(); // Restore mocks to get default behaviour if needed
