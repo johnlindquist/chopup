@@ -124,7 +124,11 @@ describe('Chopup core logic', () => {
                     });
                 });
                 console.log(`[TEST_CORE_CLIENT] Connected successfully to ${socketPath} on attempt ${i + 1}`);
-                return currentClient!;
+                if (!currentClient) {
+                    // This case should ideally not be reached if the promise resolved successfully
+                    throw new Error("[TEST_CORE_CLIENT] Client is unexpectedly null after successful connection promise.");
+                }
+                return currentClient;
             } catch (err: unknown) {
                 const error = err as Error;
                 console.warn(`[TEST_CORE_CLIENT] Connection attempt ${i + 1} to ${socketPath} failed: ${error.message}. Retrying in ${delay}ms...`);
@@ -149,7 +153,7 @@ describe('Chopup core logic', () => {
         vi.useRealTimers(); // Ensure real timers for each test
         currentTestSocketPath = getTestSocketPath(); // Generate unique path per test
         // Mock fs operations
-        writeFileSpy = vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
+        writeFileSpy = vi.spyOn(fs, 'writeFile' as unknown as typeof fs.writeFile).mockResolvedValue(undefined);
         mkdirSpy = vi.spyOn(fsSync, 'mkdirSync');
         // Provide a mock implementation for unlinkSync
         unlinkSyncSpy = vi.spyOn(fsSync, 'unlinkSync').mockImplementation(() => { });
@@ -178,7 +182,7 @@ describe('Chopup core logic', () => {
             // @ts-expect-error Accessing private member
             const server = chopup.ipcServer;
             // @ts-expect-error Accessing private member
-            let child = chopup.childProcess; // Made mutable for potential nulling
+            const child = chopup.childProcess; // Use const as it's not reassigned here
 
             // Try graceful shutdown first
             if (server?.listening) { // Used optional chaining
@@ -204,8 +208,13 @@ describe('Chopup core logic', () => {
                 // Use treeKill mock if available, otherwise direct kill
                 const treeKillMock = vi.mocked(treeKill);
                 if (treeKillMock) {
+                    // Ensure pid is a number before passing to treeKillMock
+                    const pid = child.pid;
+                    if (typeof pid !== 'number') {
+                        throw new Error(`[TEST_CLEANUP_CORE] Expected child.pid to be a number, but got ${typeof pid}`);
+                    }
                     await new Promise<void>((resolveTreeKill, rejectTreeKill) => { // Renamed resolve to avoid conflict
-                        treeKillMock(child!.pid, 'SIGTERM', (err: Error | undefined) => { // Added err type, kept non-null for pid as it's checked
+                        treeKillMock(pid, 'SIGTERM', (err: Error | undefined) => { // Pass guarded pid
                             if (err) rejectTreeKill(err); else resolveTreeKill();
                         });
                     });
@@ -242,6 +251,8 @@ describe('Chopup core logic', () => {
 
     it('chopLog creates a file and resets buffer', async () => {
         expect(chopup).toBeDefined();
+        if (!chopup) throw new Error("Test setup failed: chopup instance is null"); // Add null check
+
         // @ts-expect-error Accessing private member for testing
         chopup.logBuffer = [
             { timestamp: Date.now(), type: 'stdout', line: 'line1\n' },
@@ -301,7 +312,7 @@ describe('Chopup core logic', () => {
 
         await new Promise<void>((resolveWrite, rejectWrite) => {
             if (!currentClient) { // Null check for currentClient
-                 return rejectWrite(new Error("currentClient is null before write"));
+                return rejectWrite(new Error("currentClient is null before write"));
             }
             currentClient.write(JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'abc' }), (err) => {
                 if (err) {
@@ -376,7 +387,7 @@ describe('Chopup core logic', () => {
 
         await new Promise<void>((resolveWrite, rejectWrite) => {
             if (!currentClient) { // Null check for currentClient
-                 return rejectWrite(new Error("currentClient is null before write"));
+                return rejectWrite(new Error("currentClient is null before write"));
             }
             currentClient.write(JSON.stringify({ command: REQUEST_LOGS_COMMAND }), (err) => {
                 if (err) {
@@ -451,7 +462,7 @@ describe('Chopup core logic', () => {
 
         await new Promise<void>((resolveWrite, rejectWrite) => {
             if (!currentClient) { // Null check for currentClient
-                 return rejectWrite(new Error("currentClient is null before write"));
+                return rejectWrite(new Error("currentClient is null before write"));
             }
             currentClient.write(JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'abc' }), (err) => {
                 if (err) {
