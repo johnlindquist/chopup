@@ -32,18 +32,10 @@ export class MockDuplex extends Duplex {
         this._connected = false;
     }
 
-    _read(size: number): void {
-        this._isReading = true;
-        while (this._buffer.length > 0) {
-            const chunk = this._buffer.shift();
-            if (!this.push(chunk)) {
-                this._isReading = false;
-                break;
-            }
-        }
-    }
+    _read(size: number) { /* no-op */ }
 
-    _write(chunk: Buffer, encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+    _write(chunk: any, encoding: BufferEncoding, callback: (error?: Error | null) => void) {
+        this.emit('data', chunk); // Echo back
         if (this._otherSide?._connected) {
             this._otherSide._receiveData(chunk);
         } else {
@@ -105,15 +97,18 @@ export class MockDuplex extends Duplex {
         }
     }
 
-    // Mimic net.Socket properties/methods needed by tests/Chopup
-    get remoteAddress(): string | undefined { return 'mock://ipc'; }
-    get remotePort(): number | undefined { return this._otherSide ? (this._otherSide as IMockSocket).id : undefined; }
-    get localAddress(): string | undefined { return 'mock://ipc'; }
-    get localPort(): number | undefined { return (this as IMockSocket).id; }
-    address() { return { port: this.localPort, family: 'ipc', address: this.localAddress }; }
-    // get destroyed() { return super.destroyed; } // Inherit from Duplex
-    // Make destroyed a public property to match net.Socket if necessary for Chopup
-    // For now, relying on Duplex's internal _destroyed and its public destroyed getter.
+    // Mock properties
+    isTTY?: boolean | undefined = false;
+    bytesRead: number = 0;
+    bytesWritten: number = 0;
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore : This is a mock property
+    remoteAddress?: string;
+    remotePort?: number;
+    // Required by IMockSocket - these are guesses for a Duplex stream acting as a socket mock
+    get localPort(): number | undefined { return undefined; } // MockDuplex doesn't have an ID
+    get localAddress(): string | undefined { return '127.0.0.1'; }
+    get remoteFamily(): string | undefined { return 'IPv4'; }
 
     end(callback?: () => void): this {
         super.end(callback);

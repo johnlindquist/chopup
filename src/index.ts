@@ -14,7 +14,8 @@ import {
     INPUT_SENT,
     INPUT_SEND_ERROR,
     INPUT_SEND_ERROR_NO_CHILD,
-    INPUT_SEND_ERROR_BACKPRESSURE
+    INPUT_SEND_ERROR_BACKPRESSURE,
+    type ChopupOptions
 } from "./chopup";
 
 let effectiveArgv = process.argv;
@@ -130,7 +131,7 @@ async function mainAction(
     optionsFromAction: Record<string, unknown>,
 ) {
     const commandName = this.name();
-    let combinedOptions: Record<string, any>;
+    let combinedOptions: Record<string, unknown>;
     if (this.parent) {
         combinedOptions = { ...this.parent.opts(), ...optionsFromAction };
     } else {
@@ -151,7 +152,7 @@ async function mainAction(
     } = combinedOptions;
 
     const defaultLogDir = process.env.CHOPUP_LOG_DIR || path.join(os.tmpdir(), "chopup", "logs");
-    const logDir = path.resolve(logDirOption || defaultLogDir);
+    const logDir = path.resolve(typeof logDirOption === 'string' ? logDirOption : defaultLogDir);
 
     if (effectiveCommandName === "run") {
         const commandToRun = commandArgsFromAction[0];
@@ -175,7 +176,23 @@ async function mainAction(
 
         log(`Run: Command = '${commandToRun}', Args = '${Cargs.join(" ")}', LogDir = '${logDir}', SocketForServer = '${socketPathOption || "Default"}'`);
 
-        const chopupInstance = new Chopup(commandToRun, Cargs, logDir, socketPathOption);
+        // Log the values for debugging
+        console.log(`[DEBUG] commandToRun: ${commandToRun}, args: ${Cargs.join(" ")}`);
+        console.log(`[DEBUG] socketPathOption: ${socketPathOption}, type: ${typeof socketPathOption}`);
+        console.log(`[DEBUG] logDir: ${logDir}, type: ${typeof logDir}`);
+
+        const chopupInstance = new Chopup(
+            [commandToRun, ...Cargs],
+            {
+                command: [commandToRun, ...Cargs],
+                logDir: logDir,
+                socketPath: socketPathOption as string,
+                verbose: combinedOptions.verbose as boolean
+            }
+        );
+
+        // Log the actual socket path used
+        console.log(`[DEBUG] Actual socket path: ${chopupInstance.getSocketPath()}`);
 
         const getActualSocketPath = () => chopupInstance.getSocketPath();
 
@@ -268,17 +285,21 @@ program
     .option("-w, --watch-file <file>", "EXPERIMENTAL: File/dir to watch for triggering log chops on the 'run' instance.")
     .option("-s, --socket-path <path>", "For 'run': specify IPC server socket path. Default: generated in log-dir.")
     .option("--send <input>", "EXPERIMENTAL: For 'run': send initial input string after start.")
-    .argument("[command_to_run...]", "Command and args to run (default action is 'run').")
-    .action(async function (this: CommanderCommand, commandToRunAndArgs: string[], options: Record<string, unknown>) {
-        if (commandToRunAndArgs.length > 0) {
-            await mainAction.call(this, commandToRunAndArgs, options);
-        } else {
-            const isHelpFlag = process.argv.includes('-h') || process.argv.includes('--help');
-            if (!isHelpFlag) {
-                logWarn("No command provided. Displaying help.");
-            }
-            program.help();
-        }
+    .option("-v, --verbose", "Enable verbose logging", false)
+    .option("--initial-chop", "Perform an initial log chop immediately on startup", false)
+    .argument("[command...]", "The command to wrap and execute")
+    .action(async (command) => {
+        const chopupInstance = new Chopup(
+            command, // Command array
+            {
+                command,
+                verbose: program.opts().verbose,
+                socketPath: program.opts().socketPath,
+                logDir: program.opts().logDir,
+                initialChop: program.opts().initialChop
+            } as ChopupOptions
+        );
+        await chopupInstance.run();
     });
 
 program
