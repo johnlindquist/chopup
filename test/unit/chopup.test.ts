@@ -43,7 +43,7 @@ class FakeChildProcess extends EventEmitter {
         this.stderr = new EventEmitter();
         if (hasStdin) {
             this.stdin = {
-                write: vi.fn((_data, cb) => { if (cb) cb(); return true; }), // Mock write
+                write: vi.fn((_data: unknown, cb) => { if (cb) cb(); return true; }), // Mock write, specify unknown for _data
                 end: vi.fn(),
             };
         } else {
@@ -125,8 +125,8 @@ describe('Chopup', () => {
         // Close client connection if it exists
         if (client && !client.destroyed) {
             console.log("[TEST_CLEANUP] Closing test client connection.");
-            const closePromise = new Promise<void>(resolve => client!.once('close', resolve));
-            client!.destroy(); // Force close
+            const closePromise = new Promise<void>(resolve => client.once('close', resolve));
+            client.destroy();
             await closePromise;
             console.log("[TEST_CLEANUP] Test client connection closed.");
             client = null;
@@ -165,18 +165,22 @@ describe('Chopup', () => {
         // Cleanup: close server, attempt to remove socket, ensure child killed
         if (serverInstance) {
             // Accessing private members for testing cleanup is okay here
-            const server = serverInstance['ipcServer'] as net.Server | undefined;
-            const child = serverInstance['childProcess'] as ChildProcess | null;
+            const server = (serverInstance as any).ipcServer as net.Server | undefined;
+            const child = (serverInstance as any).childProcess as ChildProcess | null;
 
             if (server?.listening) { // Use optional chaining instead of non-null assertion
-                console.log(`[TEST_CLEANUP] Closing server instance for socket: ${serverInstance.getSocketPath()}`);
+                if (serverInstance) { // Add null check for serverInstance
+                    console.log(`[TEST_CLEANUP] Closing server instance for socket: ${serverInstance.getSocketPath()}`);
+                }
                 await new Promise<void>((resolve, reject) => {
-                    server.close(resolve);
+                    server.close((err) => { if (err) reject(err); else resolve(); });
                 });
             }
             // @ts-expect-error Accessing private member
-            if (child?.pid && serverInstance['currentFakeChild'] && !serverInstance['currentFakeChild'].killed) { // Use optional chaining
-                console.log(`[TEST_CLEANUP] Killing fake child PID ${child.pid} for socket: ${serverInstance.getSocketPath()}`);
+            if (child?.pid && (serverInstance as any).currentFakeChild && !(serverInstance as any).currentFakeChild.killed) { // Use optional chaining
+                if (serverInstance) { // Add null check for serverInstance
+                    console.log(`[TEST_CLEANUP] Killing fake child PID ${child.pid} for socket: ${serverInstance.getSocketPath()}`);
+                }
                 // Use treeKill mock if available
                 treeKill(child.pid, 'SIGTERM');
             }
@@ -252,10 +256,8 @@ describe('Chopup', () => {
         console.log(`[TEST_HELPER] Created Chopup instance with socket: ${instance.getSocketPath()}`);
 
         // Important: Add a cleanup for the existsSync mock specific to this instance creation
-        // @ts-expect-error Accessing private method for test setup
-        const originalPerformFinalCleanup = instance.performFinalCleanup;
-        // @ts-expect-error Overriding private method for test cleanup
-        instance.performFinalCleanup = async (...cleanupArgs: [number | null, NodeJS.Signals | null]) => {
+        const originalPerformFinalCleanup = (instance as any).performFinalCleanup;
+        (instance as any).performFinalCleanup = async (...cleanupArgs: [number | null, NodeJS.Signals | null]) => {
             await originalPerformFinalCleanup.apply(instance, cleanupArgs);
             vi.spyOn(fsSync, 'existsSync').mockImplementation(originalExistsSync); // Restore original
             vi.spyOn(fsSync, 'unlinkSync').mockImplementation(originalUnlinkSync); // Restore original unlinkSync
@@ -350,8 +352,7 @@ describe('Chopup', () => {
         it('should initialize properties correctly', () => {
             const { instance: chopup } = createChopupInstance();
             expect(chopup.getSocketPath()).toBe(currentTestSocketPath);
-            // @ts-expect-error Test access to private member
-            expect(chopup.logDirectoryPath).toBe(TEST_LOG_DIR);
+            expect((chopup as any).logDirectoryPath).toBe(TEST_LOG_DIR);
         });
 
         it('should use provided socketPath if available', () => {
@@ -397,16 +398,12 @@ describe('Chopup', () => {
         it('should initialize signal handlers, IPC server, and spawn child process', async () => {
             const { instance: chopup, spawnFn: spawnFnSpyFromHelper } = createChopupInstance();
             // Spy on methods of the actual instance
-            // @ts-expect-error Spying on private method
-            const initializeSignalHandlersSpy = vi.spyOn(chopup, 'initializeSignalHandlers');
-            // @ts-expect-error Spying on private method
-            const setupIpcServerSpy = vi.spyOn(chopup, 'setupIpcServer');
-            // const spawnFnSpy = (chopup as any).spawnFn as Mock; // Get from helper now
+            const initializeSignalHandlersSpy = vi.spyOn(chopup as any, 'initializeSignalHandlers');
+            const setupIpcServerSpy = vi.spyOn(chopup as any, 'setupIpcServer');
 
             const runPromise = chopup.run();
             // Wait for server to be ready using the internal promise
-            // @ts-expect-error Accessing private promise for test sync
-            await chopup.serverReadyPromise;
+            await (chopup as any).serverReadyPromise;
 
             expect(initializeSignalHandlersSpy).toHaveBeenCalled();
             expect(setupIpcServerSpy).toHaveBeenCalled();
@@ -426,12 +423,10 @@ describe('Chopup', () => {
 
         it('should log startup messages via logToConsole', async () => {
             const { instance: chopup } = createChopupInstance();
-            // @ts-expect-error Spying on private method
-            const logToConsoleSpy = vi.spyOn(chopup, 'logToConsole');
+            const logToConsoleSpy = vi.spyOn(chopup as any, 'logToConsole');
             const runPromise = chopup.run();
 
-            // @ts-expect-error Accessing private promise for test sync
-            await chopup.serverReadyPromise; // Wait for server ready
+            await (chopup as any).serverReadyPromise; // Wait for server ready
 
             // Advance timers to allow for async operations like process.nextTick within server ready sequence
             await vi.advanceTimersToNextTimerAsync();
@@ -457,18 +452,16 @@ describe('Chopup', () => {
 
         // Mock Socket class for testing IPC handler
         class MockClientSocket extends EventEmitter {
-            write = vi.fn((_data: unknown, cb?: () => void) => { if (cb) cb(); return true; }); // Changed any to unknown
+            write = vi.fn((_data: unknown, cb?: () => void) => { if (cb) cb(); return true; });
             end = vi.fn();
             destroyed = false;
-            // constructor() { super(); } // Removed unnecessary constructor
         }
 
         beforeEach(async () => {
             const { instance, getMockServerConnectionHandler } = createChopupInstance();
             testChopup = instance;
             serverInstance = instance; // Track for afterEach cleanup
-            // @ts-expect-error Calling private method for test setup
-            testChopup.setupIpcServer();
+            (testChopup as any).setupIpcServer();
             const handler = getMockServerConnectionHandler();
             if (!handler) {
                 throw new Error('Connection handler not set up on mock server');
@@ -486,8 +479,7 @@ describe('Chopup', () => {
             await (instance as any).serverReadyPromise;
 
             // Verify netCreateServerFn was called from the instance's injected dependency
-            // @ts-expect-error Accessing injected mock property for test verification
-            const createServerFnSpy = vi.mocked(instance.netCreateServerFn);
+            const createServerFnSpy = vi.mocked((instance as any).netCreateServerFn);
             expect(createServerFnSpy).toHaveBeenCalled();
             const actualMockedServer = createServerFnSpy.mock.results[0].value;
             const listenSpy = actualMockedServer.listen as Mock;
@@ -501,13 +493,10 @@ describe('Chopup', () => {
         it('should handle "request-logs" command', async () => {
             // serverReadyPromise needs to resolve for some internal logic if run() is called.
             // For direct handler testing, we might not need full run(), but let's ensure server is "ready".
-            // @ts-expect-error Calling private method for test setup
-            testChopup.resolveServerReady();
+            (testChopup as any).resolveServerReady();
 
-            // @ts-expect-error Spying on private method
-            const chopLogSpy = vi.spyOn(testChopup, 'chopLog');
-            // @ts-expect-error Access private member for test setup
-            testChopup.logBuffer.push({ timestamp: Date.now(), type: 'stdout', line: 'test log for request\n' });
+            const chopLogSpy = vi.spyOn(testChopup as any, 'chopLog');
+            (testChopup as any).logBuffer.push({ timestamp: Date.now(), type: 'stdout', line: 'test log for request\n' });
 
             // Simulate client connection
             mockConnectionHandler(mockClientSocket as unknown as net.Socket);
@@ -522,12 +511,10 @@ describe('Chopup', () => {
         });
 
         it('should handle "send-input" command and write to child stdin', async () => {
-            // @ts-expect-error Calling private method for test setup
-            testChopup.resolveServerReady();
+            (testChopup as any).resolveServerReady();
             // Ensure childProcess and its stdin are set up on testChopup for this test
             // The global fakeChild is used by createChopupInstance, which sets it on the instance
-            // @ts-expect-error Setting private member for test setup
-            testChopup.childProcess = fakeChild as unknown as ChildProcess;
+            (testChopup as any).childProcess = fakeChild as unknown as ChildProcess;
 
             const testInput = 'hello child';
             const stdinWriteSpy = fakeChild?.stdinWriteMock;
@@ -544,13 +531,10 @@ describe('Chopup', () => {
         });
 
         it('should handle "send-input" when child process stdin is not available', async () => {
-            // @ts-expect-error Calling private method for test setup
-            testChopup.resolveServerReady();
+            (testChopup as any).resolveServerReady();
             const childWithoutStdin = new FakeChildProcess(false);
-            // @ts-expect-error Setting private member for test setup
-            testChopup.childProcess = childWithoutStdin as unknown as ChildProcess;
-            // @ts-expect-error Accessing private member for test verification
-            expect(testChopup.childProcess.stdin).toBeNull();
+            (testChopup as any).childProcess = childWithoutStdin as unknown as ChildProcess;
+            expect((testChopup as any).childProcess.stdin).toBeNull();
 
             mockConnectionHandler(mockClientSocket as unknown as net.Socket);
             mockClientSocket.emit('data', JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'test' }));
@@ -561,8 +545,7 @@ describe('Chopup', () => {
         });
 
         it('should handle unknown IPC command', async () => {
-            // @ts-expect-error Calling private method for test setup
-            testChopup.resolveServerReady();
+            (testChopup as any).resolveServerReady();
             mockConnectionHandler(mockClientSocket as unknown as net.Socket);
             mockClientSocket.emit('data', JSON.stringify({ command: 'unknown-command' }));
 
@@ -572,8 +555,7 @@ describe('Chopup', () => {
         });
 
         it('should handle IPC data parse error', async () => {
-            // @ts-expect-error Calling private method for test setup
-            testChopup.resolveServerReady();
+            (testChopup as any).resolveServerReady();
             mockConnectionHandler(mockClientSocket as unknown as net.Socket);
             mockClientSocket.emit('data', 'invalid json'); // Send invalid JSON directly
 
@@ -613,8 +595,7 @@ describe('Chopup', () => {
         it('should perform final cleanup on child process exit', async () => {
             const { instance: localChopupInstance } = createChopupInstance();
             serverInstance = localChopupInstance; // Track
-            // @ts-expect-error Spying on private method
-            const doCleanupSpy = vi.spyOn(localChopupInstance, 'doCleanup');
+            const doCleanupSpy = vi.spyOn(localChopupInstance as any, 'doCleanup');
             const runPromise = localChopupInstance.run();
             await (localChopupInstance as any).serverReadyPromise; // Wait for setup
 
@@ -634,13 +615,11 @@ describe('Chopup', () => {
         it('doCleanup should call performFinalCleanup and prevent multiple runs', async () => {
             const { instance: localChopupInstance } = createChopupInstance();
             serverInstance = localChopupInstance; // Track
-            // @ts-expect-error Spying on private method
-            const performFinalCleanupSpy = vi.spyOn(localChopupInstance, 'performFinalCleanup').mockResolvedValue(undefined);
+            const performFinalCleanupSpy = vi.spyOn(localChopupInstance as any, 'performFinalCleanup').mockResolvedValue(undefined);
             await (localChopupInstance as any).doCleanup(0, 'SIGINT');
             await vi.runAllTimersAsync(); // Ensure async operations in doCleanup complete
             expect(performFinalCleanupSpy).toHaveBeenCalledTimes(1);
-            // @ts-expect-error Accessing private member for test verification
-            expect(localChopupInstance.cleanupInitiated).toBe(true);
+            expect((localChopupInstance as any).cleanupInitiated).toBe(true);
             await (localChopupInstance as any).doCleanup(0, 'SIGINT');
             await vi.runAllTimersAsync(); // And again
             expect(performFinalCleanupSpy).toHaveBeenCalledTimes(1); // Should not call again
@@ -649,8 +628,7 @@ describe('Chopup', () => {
         it('initializeSignalHandlers should set up process signal listeners', () => {
             const processOnSpy = vi.spyOn(process, 'on');
             const { instance: localChopupInstance } = createChopupInstance();
-            // @ts-expect-error Calling private method for test
-            localChopupInstance.initializeSignalHandlers();
+            (localChopupInstance as any).initializeSignalHandlers();
             expect(processOnSpy).toHaveBeenCalledWith('SIGINT', expect.any(Function));
             expect(processOnSpy).toHaveBeenCalledWith('SIGTERM', expect.any(Function));
             expect(processOnSpy).toHaveBeenCalledWith('exit', expect.any(Function));
@@ -667,13 +645,10 @@ describe('Chopup', () => {
             const { instance: localChopupInstance } = createChopupInstance(['test-cmd', 'arg1', 'arg2']);
             serverInstance = localChopupInstance; // Track
             const dateNowSpy = vi.spyOn(Date, 'now');
-            // @ts-expect-error Accessing private member for test setup
             (localChopupInstance as any).lastChopTime = MOCK_LAST_CHOP_TIME;
             (localChopupInstance as any).logBuffer = [];
             dateNowSpy.mockReturnValue(MOCK_RECORD_OUTPUT_TIME);
-            // @ts-expect-error Calling private method for test
             (localChopupInstance as any).recordOutput(Buffer.from('line1\n'), 'stdout');
-            // @ts-expect-error Calling private method for test
             (localChopupInstance as any).recordOutput(Buffer.from('line2\n'), 'stderr');
             dateNowSpy.mockReturnValue(MOCK_CHOP_TIME);
             await (localChopupInstance as any).chopLog();
@@ -690,12 +665,9 @@ describe('Chopup', () => {
             const { instance: localChopupInstance } = createChopupInstance(['test-cmd', 'arg1', 'arg2']);
             serverInstance = localChopupInstance; // Track
             const dateNowSpy = vi.spyOn(Date, 'now');
-            // @ts-expect-error Accessing private member for test setup
             (localChopupInstance as any).lastChopTime = MOCK_LAST_CHOP_TIME;
-            // @ts-expect-error Accessing private member for test setup
             (localChopupInstance as any).logBuffer = [];
             dateNowSpy.mockReturnValue(MOCK_RECORD_OUTPUT_TIME);
-            // @ts-expect-error Calling private method for test
             (localChopupInstance as any).recordOutput(Buffer.from('final line\n'), 'stdout');
             dateNowSpy.mockReturnValue(MOCK_CHOP_TIME);
             await (localChopupInstance as any).chopLog(true); // finalChop = true
@@ -710,7 +682,6 @@ describe('Chopup', () => {
             const { instance: localChopupInstance } = createChopupInstance();
             serverInstance = localChopupInstance; // Track
             (fs.writeFile as Mock).mockClear();
-            // @ts-expect-error Accessing private member for test setup
             (localChopupInstance as any).logBuffer = [];
             await (localChopupInstance as any).chopLog(false); // finalChop = false
             expect(fs.writeFile).not.toHaveBeenCalled();
