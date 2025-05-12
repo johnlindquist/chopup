@@ -1,418 +1,298 @@
 import { EventEmitter } from 'node:events';
-import type { Duplex } from 'node:stream';
+import { Duplex } from 'node:stream';
 
-// @ts-ignore - MockDuplex is a minimal mock and intentionally doesn't fully implement Duplex
-export class MockDuplex extends EventEmitter implements Duplex {
-    writable = true;
-    readable = true;
-    readableHighWaterMark = 16384;
-    writableHighWaterMark = 16384;
-    readableLength = 0;
-    writableLength = 0;
-    writableCorked = 0;
-    destroyed = false;
+// Type Definitions
+export type ConnectionListener = (socket: IMockSocket) => void;
+export type MockServerMap = Map<string, IMockServer>; // path -> server
 
-    _dataBuffer: unknown[] = [];
-    _isReading = false;
+// Global state for mock IPC
+const mockServers: MockServerMap = new Map();
+let nextSocketId = 0;
 
-    write(chunk: unknown, encodingOrCb?: BufferEncoding | ((error?: Error | null) => void), cb?: (error?: Error | null) => void): boolean {
-        let newChunk = chunk;
-        let newEncodingOrCb = encodingOrCb;
-        let newCb = cb;
+export function resetMockIpc(): void {
+    for (const server of mockServers.values()) {
+        server.close(); // Ensure servers are closed
+    }
+    mockServers.clear();
+    nextSocketId = 0;
+}
 
-        if (typeof chunk === 'string') {
-            if (typeof encodingOrCb === 'string') {
-                // write(string, encoding, cb)
-            } else if (typeof encodingOrCb === 'function') {
-                // write(string, cb)
-                newCb = encodingOrCb;
-                newEncodingOrCb = undefined; // Use undefined instead of null
-            } else {
-                // write(string)
-                newEncodingOrCb = undefined; // Use undefined instead of null
-            }
-        } else if (chunk instanceof Buffer || chunk instanceof Uint8Array) {
-            if (typeof encodingOrCb === 'function') {
-                // write(buffer, cb)
-                newCb = encodingOrCb;
-                newEncodingOrCb = undefined; // Use undefined instead of null
-            } else {
-                // write(buffer)
-            }
-        } else if (typeof chunk === 'function') {
-            // Handle case where chunk is callback (write(cb))
-            newCb = chunk as () => void;
-            newChunk = null; // chunk is null here
-            newEncodingOrCb = undefined; // Use undefined instead of null
-        } else if (typeof newEncodingOrCb === 'function') {
-            newCb = newEncodingOrCb as () => void;
-            newEncodingOrCb = undefined; // Use undefined instead of null
-        }
+// Helper function to simulate async operations
+const tick = () => new Promise(resolve => process.nextTick(resolve));
 
-        if (this.destroyed) {
-            const err = new Error('write after destroyed');
-            if (newCb) {
-                process.nextTick(newCb, err);
-            } else {
-                process.nextTick(() => this.emit('error', err));
-            }
-            return false;
-        }
-        this.emit('_data_to_other_side', newChunk);
-        if (newCb) process.nextTick(newCb, null);
-        return true;
+export class MockDuplex extends Duplex {
+    private _otherSide: MockDuplex | null = null;
+    private _buffer: Buffer[] = [];
+    private _isReading: boolean;
+    _connected: boolean;
+
+    constructor(options?: import('stream').DuplexOptions) {
+        super(options);
+        this._isReading = false;
+        this._connected = false;
     }
 
-    end(cb?: () => void): this;
-    end(chunk: unknown, cb?: () => void): this;
-    end(chunk: unknown, encoding?: BufferEncoding, cb?: () => void): this;
-    end(chunk?: unknown, encodingOrCb?: BufferEncoding | (() => void), cb?: () => void): this {
-        let newCb = cb;
-        let newChunk = chunk;
-        let newEncodingOrCb = encodingOrCb;
-
-        if (typeof newChunk === 'function') {
-            newCb = newChunk as () => void;
-            newChunk = null;
-            newEncodingOrCb = null;
-        } else if (typeof newEncodingOrCb === 'function') {
-            newCb = newEncodingOrCb as () => void;
-            newEncodingOrCb = null;
-        }
-
-        if (newChunk && this.writable) {
-            this.write(newChunk, newEncodingOrCb as BufferEncoding | undefined, () => {
-                this.writable = false;
-                process.nextTick(() => this.emit('finish'));
-                if (newCb) process.nextTick(newCb);
-            });
-        } else {
-            this.writable = false;
-            process.nextTick(() => this.emit('finish'));
-            if (newCb) process.nextTick(newCb);
-        }
-
-        this.emit('_end_to_other_side');
-        return this;
-    }
-
-    _receiveData(chunk: unknown) {
-        if (this.readable && !this.destroyed) {
-            this._dataBuffer.push(chunk);
-            if (this._isReading) {
-                while (this._dataBuffer.length > 0 && this.readable && !this.destroyed) {
-                    const dataToEmit = this._dataBuffer.shift();
-                    this.emit('data', dataToEmit);
-                }
-            }
-        }
-    }
-
-    _receiveEnd() {
-        if (this.readable && !this.destroyed) {
-            this.readable = false;
-            process.nextTick(() => this.emit('end'));
-        }
-    }
-
-    read(size?: number): unknown {
-        this._isReading = true;
-        if (this._dataBuffer.length > 0) {
-            return this._dataBuffer.shift();
-        }
-        return null;
-    }
-
-    pause(): this { this._isReading = false; return this; }
-    resume(): this {
-        this._isReading = true;
-        process.nextTick(() => {
-            while (this._dataBuffer.length > 0 && this.readable && !this.destroyed && this._isReading) {
-                this.emit('data', this._dataBuffer.shift());
-            }
-        });
-        return this;
-    }
-    isPaused(): boolean { return !this._isReading; }
-    setEncoding(encoding: BufferEncoding): this { return this; }
-
-    destroy(error?: Error | null): this {
-        if (this.destroyed) return this;
-        this.destroyed = true;
-        this.writable = false;
-        this.readable = false;
-
-        this._dataBuffer = [];
-
-        process.nextTick(() => {
-            if (error) {
-                this.emit('error', error);
-            }
-            this.emit('close');
-        });
-        return this;
-    }
-
-    _write(chunk: unknown, encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-        this.write(chunk, encoding, callback);
-    }
     _read(size: number): void {
-    }
-    _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
-        this.destroy(error);
-        callback(error);
-    }
-    pipe<T extends NodeJS.WritableStream>(destination: T, options?: { end?: boolean; }): T {
-        const onData = (chunk: unknown) => {
-            // Ensure chunk is Buffer or string before writing
-            const dataToWrite = chunk instanceof Buffer ? chunk : String(chunk);
-            if (!destination.write(dataToWrite)) {
-                this.pause();
-                destination.once('drain', () => this.resume());
-            }
-        };
-        this.on('data', onData);
-
-        const onEnd = () => {
-            if (options?.end !== false) {
-                destination.end();
-            }
-        };
-        this.once('end', onEnd);
-
-        let errored = false;
-        const onError = (err: Error) => {
-            if (errored) return;
-            errored = true;
-            this.removeListener('data', onData);
-            this.removeListener('end', onEnd);
-            destination.emit('error', err);
-        }
-        this.once('error', onError);
-        destination.once('error', (err) => {
-            if (errored) return;
-            errored = true;
-            this.removeListener('data', onData);
-            this.removeListener('end', onEnd);
-            this.emit('error', err);
-        });
-
-        return destination;
-    }
-    unpipe(destination?: NodeJS.WritableStream): this {
-        if (destination) {
-            this.removeAllListeners('data');
-            this.removeAllListeners('end');
-            this.removeAllListeners('error');
-        }
-        return this;
-    }
-    unshift(chunk: unknown, encoding?: BufferEncoding): void {
-        if (this.readable && !this.destroyed) {
-            this._dataBuffer.unshift(chunk);
-        }
-    }
-    wrap(stream: NodeJS.ReadableStream): this { return this; }
-
-    [Symbol.asyncIterator](): AsyncIterableIterator<unknown> {
-        const stream = this;
-        async function* gen() {
-            let listener: (() => void) | null = null;
-            const buffer: unknown[] = [];
-            let ended = false;
-            let error: Error | null = null;
-
-            const onData = (chunk: unknown) => {
-                buffer.push(chunk);
-                if (listener) listener();
-            };
-            const onEnd = () => {
-                ended = true;
-                if (listener) listener();
-            };
-            const onError = (err: Error) => {
-                error = err;
-                if (listener) listener();
-            };
-
-            stream.on('data', onData);
-            stream.on('end', onEnd);
-            stream.on('error', onError);
-
-            try {
-                while (true) {
-                    if (error) throw error;
-                    if (buffer.length > 0) {
-                        yield buffer.shift();
-                        continue;
-                    }
-                    if (ended) return;
-
-                    await new Promise<void>(resolve => {
-                        listener = resolve;
-                    });
-                    listener = null;
-                }
-            } finally {
-                stream.removeListener('data', onData);
-                stream.removeListener('end', onEnd);
-                stream.removeListener('error', onError);
+        this._isReading = true;
+        while (this._buffer.length > 0) {
+            const chunk = this._buffer.shift();
+            if (!this.push(chunk)) {
+                this._isReading = false;
+                break;
             }
         }
-        return gen();
+    }
+
+    _write(chunk: Buffer, encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
+        if (this._otherSide?._connected) {
+            this._otherSide._receiveData(chunk);
+        } else {
+            // Silently drop data if not connected or no other side? Or error?
+            // For now, let's drop silently, similar to a closed socket
+        }
+        callback();
     }
 
     _final(callback: (error?: Error | null) => void): void {
-        process.nextTick(() => callback());
+        if (this._otherSide) {
+            this._otherSide.push(null); // Signal EOF to the other side
+        }
+        callback();
     }
+
+    _destroy(error: Error | null, callback: (error?: Error | null) => void): void {
+        this._connected = false;
+        if (this._otherSide?._connected) {
+            this._otherSide.destroy(error ?? undefined); // Propagate destroy
+        }
+        this._otherSide = null;
+        this.emit('close', !!error); // Emit close event
+        callback(error);
+    }
+
+    // Custom method to link two MockDuplex streams
+    _link(other: MockDuplex): void {
+        this._otherSide = other;
+        other._otherSide = this; // Bidirectional link
+        this._connected = true;
+        other._connected = true;
+
+        // Flush any buffered data now that they are linked
+        this._flushBuffer();
+        other._flushBuffer();
+    }
+
+    // Custom method to receive data from the linked stream
+    _receiveData(chunk: Buffer): void {
+        if (this._isReading) {
+            if (!this.push(chunk)) {
+                this._isReading = false;
+            }
+        } else {
+            this._buffer.push(chunk);
+        }
+    }
+
+    _flushBuffer(): void {
+        if (this._isReading) {
+            while (this._buffer.length > 0) {
+                const chunk = this._buffer.shift();
+                if (!this.push(chunk)) {
+                    this._isReading = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Mimic net.Socket properties/methods needed by tests/Chopup
+    get remoteAddress(): string | undefined { return 'mock://ipc'; }
+    get remotePort(): number | undefined { return this._otherSide ? (this._otherSide as IMockSocket).id : undefined; }
+    get localAddress(): string | undefined { return 'mock://ipc'; }
+    get localPort(): number | undefined { return (this as IMockSocket).id; }
+    address() { return { port: this.localPort, family: 'ipc', address: this.localAddress }; }
+    // get destroyed() { return super.destroyed; } // Inherit from Duplex
+    // Make destroyed a public property to match net.Socket if necessary for Chopup
+    // For now, relying on Duplex's internal _destroyed and its public destroyed getter.
+
+    end(callback?: () => void): this {
+        super.end(callback);
+        return this;
+    }
+    // ref() and unref() are often called but don't need to do anything in the mock
+    ref() { return this; }
+    unref() { return this; }
 }
 
+// Interface for Mock Socket matching net.Socket structure needed
+export interface IMockSocket extends MockDuplex {
+    id: number;
+    path: string; // The path it tried to connect to
+    // Add any other net.Socket methods/properties if Chopup uses them
+}
+
+// Interface for Mock Server matching net.Server structure needed
 export interface IMockServer extends EventEmitter {
-    listen: (path: string, callback?: () => void) => IMockServer;
-    close: (callback?: (err?: Error) => void) => IMockServer;
-    address: () => string | { path: string, port: number | null, family: string, address: string | null } | null;
+    listen: (path: string, callback?: () => void) => this;
+    close: (callback?: (err?: Error) => void) => this;
+    address: () => string | { port: number; family: string; address: string } | null;
+    _listeningPath: string | null;
+    _connections: Set<IMockSocket>;
+    _connectionListener: ConnectionListener | null;
+    // Internal method to simulate a connection
     _simulateConnection: (clientSocket: IMockSocket) => void;
 }
 
-export interface IMockSocket extends MockDuplex {
-    connect: (path: string, connectListener?: () => void) => void;
-    _simulateDataFromServer: (data: string | Buffer) => void;
-    _simulateEndFromServer: () => void;
-}
 
-const activeServers = new Map<string, IMockServer>();
-const serverUserConnectionListeners = new Map<string, (socket: IMockSocket) => void>();
-
-export function createServer(userConnectionListener: (socket: IMockSocket) => void): IMockServer {
+export function createServer(connectionListener?: ConnectionListener): IMockServer {
     const server = new EventEmitter() as IMockServer;
-    let listeningPath: string | null = null;
-    let isClosed = false;
+    server._listeningPath = null;
+    server._connections = new Set();
+    server._connectionListener = connectionListener || null;
 
-    server.listen = (path, callback): IMockServer => {
-        if (isClosed) {
-            if (callback) process.nextTick(callback);
+    server.listen = (path: string, callback?: () => void): IMockServer => {
+        if (server._listeningPath) {
+            throw new Error(`Server already listening on ${server._listeningPath}`);
+        }
+        if (mockServers.has(path)) {
+            const error = new Error(`EADDRINUSE: address already in use ${path}`);
+            (error as NodeJS.ErrnoException).code = 'EADDRINUSE';
+            // Defer emission to mimic async nature
+            process.nextTick(() => server.emit('error', error));
             return server;
         }
-        if (activeServers.has(path)) {
-            const err = new Error(`EADDRINUSE: address already in use ${path}`) as NodeJS.ErrnoException;
-            err.code = 'EADDRINUSE';
-            process.nextTick(() => server.emit('error', err));
-            if (callback) process.nextTick(callback);
-            return server;
-        }
-        listeningPath = path;
-        activeServers.set(path, server);
-        serverUserConnectionListeners.set(path, userConnectionListener);
-
-        if (callback) process.nextTick(callback);
-        process.nextTick(() => server.emit('listening'));
+        server._listeningPath = path;
+        mockServers.set(path, server);
+        // Defer emission to mimic async nature
+        process.nextTick(() => {
+            server.emit('listening');
+            if (callback) callback();
+        });
         return server;
     };
 
-    server.close = (callback): IMockServer => {
-        if (isClosed) {
-            if (callback) process.nextTick(callback);
-            return server;
-        }
-        isClosed = true;
-        if (listeningPath) {
-            activeServers.delete(listeningPath);
-            serverUserConnectionListeners.delete(listeningPath);
-        }
-        process.nextTick(() => server.emit('close'));
-        if (callback) process.nextTick(callback);
-        listeningPath = null;
-        return server;
-    };
+    server.close = (callback?: (err?: Error) => void): IMockServer => {
+        if (server._listeningPath) {
+            mockServers.delete(server._listeningPath);
+            server._listeningPath = null;
 
-    server.address = () => listeningPath ? { path: listeningPath, port: null, family: 'IPC', address: listeningPath } : null;
+            // Close all active connections gracefully
+            const closePromises = Array.from(server._connections).map(socket =>
+                new Promise<void>(resolve => {
+                    if (!socket.destroyed) {
+                        socket.once('close', () => resolve());
+                        socket.end(); // Initiate graceful close
+                        socket.destroy(); // Force destroy if end doesn't close quickly
+                    } else {
+                        resolve();
+                    }
+                })
+            );
 
-    (server as IMockServer)._simulateConnection = (clientSocket: IMockSocket) => {
-        if (isClosed || !listeningPath) {
-            process.nextTick(() => clientSocket.emit('error', new Error('Server not listening or closed')));
-            return;
-        }
-        const userListener = serverUserConnectionListeners.get(listeningPath);
-        if (userListener) {
-            const serverSideSocket = new MockDuplex() as IMockSocket;
-
-            clientSocket.on('_data_to_other_side', (data) => {
-                serverSideSocket._receiveData(data);
-            });
-            serverSideSocket.on('_data_to_other_side', (data) => {
-                clientSocket._receiveData(data);
+            Promise.all(closePromises).then(() => {
+                process.nextTick(() => { // Defer close event
+                    server.emit('close');
+                    if (callback) callback();
+                });
+            }).catch(err => {
+                process.nextTick(() => { // Defer close event with error
+                    if (callback) callback(err);
+                    else server.emit('error', err); // Emit error if no callback
+                });
             });
 
-            clientSocket.on('_end_to_other_side', () => serverSideSocket._receiveEnd());
-            serverSideSocket.on('_end_to_other_side', () => clientSocket._receiveEnd());
-
-            (serverSideSocket as IMockSocket)._simulateDataFromServer = (data: string | Buffer) => serverSideSocket._receiveData(data);
-            (serverSideSocket as IMockSocket)._simulateEndFromServer = () => serverSideSocket._receiveEnd();
-
-            // Patch: wire up stdin/stdout/stderr for fake child compatibility
-            (serverSideSocket as IMockSocket).stdin = clientSocket;
-            (serverSideSocket as IMockSocket).stdout = serverSideSocket;
-            (serverSideSocket as IMockSocket).stderr = serverSideSocket;
-            (clientSocket as IMockSocket).stdin = serverSideSocket;
-            (clientSocket as IMockSocket).stdout = clientSocket;
-            (clientSocket as IMockSocket).stderr = clientSocket;
-
-            userListener(serverSideSocket);
-            process.nextTick(() => {
-                clientSocket.emit('connect');
-                clientSocket.resume?.(); // Use optional chaining
-                serverSideSocket.resume?.(); // Use optional chaining
-            });
         } else {
-            process.nextTick(() => clientSocket.emit('error', new Error(`No listener for path ${listeningPath}`)));
+            process.nextTick(() => {
+                if (callback) callback();
+            });
         }
+        return server;
+    };
+
+    server.address = () => {
+        if (server._listeningPath) {
+            // Return path for pipe/socket, consistent with net.Server
+            return server._listeningPath;
+        }
+        return null;
+    };
+
+    // Internal method for server to handle a new connection
+    server._simulateConnection = (clientSocket: IMockSocket) => {
+        const serverSocket = new MockDuplex() as IMockSocket;
+        serverSocket.id = nextSocketId++;
+        serverSocket.path = server._listeningPath as string; // Server side knows its path
+
+        server._connections.add(serverSocket);
+
+        serverSocket.once('close', () => {
+            server._connections.delete(serverSocket);
+        });
+
+        // Link the client and server sockets
+        clientSocket._link(serverSocket);
+
+
+        // Emit connection on server *after* linking
+        if (server._connectionListener) {
+            try {
+                server._connectionListener(serverSocket);
+            } catch (error) {
+                // Errors in user listener shouldn't crash the server, emit error
+                process.nextTick(() => serverSocket.emit('error', error));
+            }
+        }
+        server.emit('connection', serverSocket);
+
+
+        // Emit 'connect' on the client side *after* server 'connection' logic ran
+        // Use nextTick to ensure server listener setup is complete
+        process.nextTick(() => {
+            if (!clientSocket.destroyed) { // Check if client was destroyed before connect
+                clientSocket.emit('connect');
+            }
+        });
+
     };
 
     return server;
 }
 
-export function createConnection(arg1: string | { path: string }, userConnectListener?: () => void): IMockSocket {
-    const actualPath = typeof arg1 === 'string' ? arg1 : arg1.path;
+export function createConnection(path: string, connectionListener?: () => void): IMockSocket {
     const clientSocket = new MockDuplex() as IMockSocket;
+    clientSocket.id = nextSocketId++;
+    clientSocket.path = path; // Store the path
 
-    (clientSocket as IMockSocket)._simulateDataFromServer = (data: string | Buffer) => clientSocket._receiveData(data);
-    (clientSocket as IMockSocket)._simulateEndFromServer = () => clientSocket._receiveEnd();
-
-    if (userConnectListener) {
-        clientSocket.once('connect', userConnectListener);
+    if (connectionListener) {
+        clientSocket.once('connect', connectionListener);
     }
 
-    clientSocket.connect = (p, cb) => {
-        if (cb) clientSocket.once('connect', cb);
+    // Simulate async connection attempt
+    process.nextTick(() => {
+        if (clientSocket.destroyed) return; // Don't proceed if destroyed before tick
 
-        const serverInstance = activeServers.get(actualPath);
-        if (!serverInstance) {
-            const err = new Error(`ECONNREFUSED: connect ECONNREFUSED ${actualPath}`) as NodeJS.ErrnoException;
-            err.code = 'ECONNREFUSED';
-            process.nextTick(() => clientSocket.emit('error', err));
-            return;
-        }
-        const userListener = serverUserConnectionListeners.get(actualPath);
-        if (userListener) {
-            serverInstance._simulateConnection(clientSocket);
+        const server = mockServers.get(path);
+        if (server?._listeningPath) { // Check server exists and is listening
+            try {
+                server._simulateConnection(clientSocket);
+                // 'connect' is emitted by _simulateConnection after server setup
+            } catch (e) {
+                // Error during connection simulation
+                const error = e instanceof Error ? e : new Error('Connection simulation failed');
+                clientSocket.emit('error', error);
+                clientSocket.destroy(error);
+            }
+
         } else {
-            const err = new Error(`ECONNREFUSED: connect ECONNREFUSED ${actualPath}`) as NodeJS.ErrnoException;
-            err.code = 'ECONNREFUSED';
-            process.nextTick(() => clientSocket.emit('error', err));
+            // No server listening at this path
+            const error = new Error(`connect ECONNREFUSED ${path}`) as NodeJS.ErrnoException;
+            error.code = 'ECONNREFUSED';
+            // error.address = path; // NodeJS.ErrnoException doesn't strictly have .address, though common in net errors
+            (error as any).address = path; // Add for test compatibility if needed, acknowledge lint
+            clientSocket.emit('error', error);
+            clientSocket.destroy(error); // Ensure socket is destroyed on connection failure
         }
-    };
-
-    clientSocket.connect(actualPath);
+    });
 
     return clientSocket;
-}
-
-export function resetMockIpc() {
-    for (const server of activeServers.values()) {
-        if (server.close && typeof server.close === 'function') {
-            server.close();
-        }
-    }
-    activeServers.clear();
-    serverUserConnectionListeners.clear();
 } 

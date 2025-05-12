@@ -76,7 +76,7 @@ async function setupWatcher(
         client.on("end", () => logger("Watcher: IPC connection ended."));
     });
     watcher.on("ready", () => logger(`Watcher: Ready and watching ${watchPath}.`));
-    watcher.on("error", (err: Error) => errorLogger(`Watcher: Error watching ${watchPath}: ${err.message}`));
+    watcher.on("error", (err: unknown) => errorLogger(`Watcher: Error watching ${watchPath}: ${(err as Error).message}`));
 }
 
 async function performInitialSend(
@@ -117,10 +117,10 @@ async function performInitialSend(
     client.on("close", () => logger("InitialSend: IPC Connection closed."));
 
     const clientTimeout = setTimeout(() => {
-        errorLogger(\`InitialSend: Operation timed out for socket \${actualSocketPath}.\`);
-        if(!client.destroyed) client.destroy();
+        errorLogger(`InitialSend: Operation timed out for socket ${actualSocketPath}.`);
+        if (!client.destroyed) client.destroy();
     }, 7000);
-    
+
     client.on("close", () => clearTimeout(clientTimeout));
 }
 
@@ -136,10 +136,10 @@ async function mainAction(
     } else {
         combinedOptions = { ...this.opts(), ...optionsFromAction };
     }
-    
+
     const effectiveCommandName = commandName === "chopup" && commandArgsFromAction.length > 0 ? "run" : commandName;
 
-    log(\`Effective command: \${effectiveCommandName}, Args: \${commandArgsFromAction.join(" ")}, Opts: \${JSON.stringify(combinedOptions)}\`);
+    log(`Effective command: ${effectiveCommandName}, Args: ${commandArgsFromAction.join(" ")}, Opts: ${JSON.stringify(combinedOptions)}`);
 
     const {
         logDir: logDirOption,
@@ -166,17 +166,17 @@ async function mainAction(
         if (!fsSync.existsSync(logDir)) {
             try {
                 await fs.mkdir(logDir, { recursive: true });
-                log(\`Log directory created / ensured: \${logDir}\`);
+                log(`Log directory created / ensured: ${logDir}`);
             } catch (err: unknown) {
-                logError(\`Fatal: Failed to create log directory \${logDir}: \${(err as Error).message}\`);
+                logError(`Fatal: Failed to create log directory ${logDir}: ${(err as Error).message}`);
                 process.exit(1);
             }
         }
-        
-        log(\`Run: Command = '\${commandToRun}', Args = '\${Cargs.join(" ")}', LogDir = '\${logDir}', SocketForServer = '\${socketPathOption || "Default"}'\`);
+
+        log(`Run: Command = '${commandToRun}', Args = '${Cargs.join(" ")}', LogDir = '${logDir}', SocketForServer = '${socketPathOption || "Default"}'`);
 
         const chopupInstance = new Chopup(commandToRun, Cargs, logDir, socketPathOption);
-        
+
         const getActualSocketPath = () => chopupInstance.getSocketPath();
 
         if (watchFileOption) {
@@ -185,7 +185,7 @@ async function mainAction(
         if (sendOption && typeof sendOption === 'string') {
             performInitialSend(sendOption, getActualSocketPath, log, logError, logWarn).catch(e => logError("Error in performInitialSend:", e));
         }
-        
+
         try {
             await chopupInstance.run();
             log("Chopup instance run completed.");
@@ -200,21 +200,21 @@ async function mainAction(
             this.help();
             process.exit(1);
         }
-        log(\`Client: Requesting logs via socket: \${clientSocketOption}\`);
+        log(`Client: Requesting logs via socket: ${clientSocketOption}`);
         const client = net.createConnection({ path: clientSocketOption as string });
-        const clientTimeout = setTimeout(() => { logError("request-logs timeout"); if(!client.destroyed) client.destroy(); process.exit(124); }, 5000);
-        
+        const clientTimeout = setTimeout(() => { logError("request-logs timeout"); if (!client.destroyed) client.destroy(); process.exit(124); }, 5000);
+
         client.on("connect", () => { log("Client: Connected for request-logs."); client.write(JSON.stringify({ command: "request-logs" })); });
         client.on("data", (data) => {
-            const res = data.toString(); log(\`Client: Response for request - logs: \${res}\`);
+            const res = data.toString(); log(`Client: Response for request - logs: ${res}`);
             if (res === "LOGS_CHOPPED") console.log("LOGS_CHOPPED"); else logWarn("Unexpected response.");
             clearTimeout(clientTimeout); client.end(() => process.exit(0));
         });
         client.on("error", (err) => {
-            logError(\`Client: Error for request-logs on \${clientSocketOption}: \${(err as NodeJS.ErrnoException).message}\`);
+            logError(`Client: Error for request-logs on ${clientSocketOption}: ${(err as NodeJS.ErrnoException).message}`);
             if ((err as NodeJS.ErrnoException).code === "ECONNREFUSED" || (err as NodeJS.ErrnoException).code === "ENOENT") console.error("CHOPUP_REQUEST_LOGS_ERROR_NO_SERVER");
             else console.error("CHOPUP_REQUEST_LOGS_ERROR_UNKNOWN");
-            clearTimeout(clientTimeout); if(!client.destroyed) client.destroy(() => process.exit(1)); else process.exit(1);
+            clearTimeout(clientTimeout); if (!client.destroyed) client.destroy(); else process.exit(1);
         });
         client.on("close", () => { clearTimeout(clientTimeout); log("Client: Connection closed for request-logs."); });
 
@@ -225,7 +225,7 @@ async function mainAction(
             this.help();
             process.exit(1);
         }
-        log(\`Client: Sending input "\${clientInputOption}" via socket: \${clientSocketOption}\`);
+        log(`Client: Sending input "${clientInputOption}" via socket: ${clientSocketOption}`);
         suppressSendInputLogs();
         const client = net.createConnection({ path: clientSocketOption as string });
         let clientExited = false;
@@ -237,22 +237,22 @@ async function mainAction(
 
         client.on("connect", () => { log("Client: Connected for send-input."); client.write(JSON.stringify({ command: "send-input", input: clientInputOption })); });
         client.on("data", (data) => {
-            const res = data.toString(); log(\`Client: Response for send-input: \${res}\`);
+            const res = data.toString(); log(`Client: Response for send-input: ${res}`);
             if (res === INPUT_SENT) { console.log(INPUT_SENT); exitClient(0); }
             else if ([INPUT_SEND_ERROR, INPUT_SEND_ERROR_NO_CHILD, INPUT_SEND_ERROR_BACKPRESSURE].includes(res)) { console.error(res); exitClient(1); }
             else if (res === "IPC_PARSE_ERROR") { console.error("CHOPUP_SEND_INPUT_ERROR_SERVER_PARSE"); exitClient(1); }
             else { logWarn("Unexpected response."); console.error("CHOPUP_SEND_INPUT_ERROR_UNEXPECTED_RESPONSE"); exitClient(1); }
         });
         client.on("error", (err) => {
-            logError(\`Client: Error for send-input on \${clientSocketOption}: \${(err as NodeJS.ErrnoException).message}\`);
+            logError(`Client: Error for send-input on ${clientSocketOption}: ${(err as NodeJS.ErrnoException).message}`);
             if ((err as NodeJS.ErrnoException).code === "ECONNREFUSED" || (err as NodeJS.ErrnoException).code === "ENOENT") console.error(INPUT_SEND_ERROR_NO_SERVER);
             else console.error("CHOPUP_SEND_INPUT_ERROR_CONNECTION_FAILED");
             exitClient(1);
         });
-        client.on("close", () => { log("Client: Connection closed for send-input."); if (!clientExited) { logWarn("Closed unexpectedly."); console.error("CHOPUP_SEND_INPUT_ERROR_UNEXPECTED_CLOSE"); exitClient(1);}});
+        client.on("close", () => { log("Client: Connection closed for send-input."); if (!clientExited) { logWarn("Closed unexpectedly."); console.error("CHOPUP_SEND_INPUT_ERROR_UNEXPECTED_CLOSE"); exitClient(1); } });
 
     } else {
-        logWarn(\`Unknown command or insufficient args for default: \${effectiveCommandName}\`);
+        logWarn(`Unknown command or insufficient args for default: ${effectiveCommandName}`);
         program.help();
     }
 }
@@ -264,12 +264,12 @@ function suppressSendInputLogs() {
 program
     .name("chopup")
     .description("Wraps processes, segments logs, allows IPC interaction.")
-    .option("-l, --log-dir <dir>", \`Log directory. Default: CHOPUP_LOG_DIR or \${path.join(os.tmpdir(), "chopup", "logs")}\`)
+    .option("-l, --log-dir <dir>", `Log directory. Default: CHOPUP_LOG_DIR or ${path.join(os.tmpdir(), "chopup", "logs")}`)
     .option("-w, --watch-file <file>", "EXPERIMENTAL: File/dir to watch for triggering log chops on the 'run' instance.")
     .option("-s, --socket-path <path>", "For 'run': specify IPC server socket path. Default: generated in log-dir.")
     .option("--send <input>", "EXPERIMENTAL: For 'run': send initial input string after start.")
     .argument("[command_to_run...]", "Command and args to run (default action is 'run').")
-    .action(async function (this: CommanderCommand, commandToRunAndArgs: string[], options: Record<string,unknown>) {
+    .action(async function (this: CommanderCommand, commandToRunAndArgs: string[], options: Record<string, unknown>) {
         if (commandToRunAndArgs.length > 0) {
             await mainAction.call(this, commandToRunAndArgs, options);
         } else {

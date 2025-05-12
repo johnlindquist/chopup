@@ -81,7 +81,7 @@ export class Chopup {
             socketPath || path.join(this.logDir, `chopup-${process.pid}.sock`);
 
         // Use injected dependencies or default to actual modules
-        this.spawnFn = spawnFunction || spawn; // Type compatibility should be better now
+        this.spawnFn = spawnFunction || spawn; // Keep as is, acknowledging potential type complexity
         this.netCreateServerFn = netModule?.createServer || net.createServer;
     }
 

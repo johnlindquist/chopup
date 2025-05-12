@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { FakeChildProcess } from '../../src/test-doubles/fake-child';
+import { FakeChildProcess } from '../../test/doubles/fake-child'; // Updated path
 import { PassThrough } from 'node:stream'; // Actual class for instanceof
 import type { PassThrough as PassThroughType } from 'node:stream'; // Type for clarity if needed elsewhere
 

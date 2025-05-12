@@ -20,7 +20,7 @@ describe('ipc-mock', () => {
             // Give a brief moment for destroy to propagate if needed, but don't hang.
             await new Promise(resolve => setTimeout(resolve, 10));
         }
-        if (server && (server as any)._listeningPath) { // Check if server was actually started
+        if (server && (server as IMockServer)._listeningPath) { // Check if server was actually started
             try {
                 await new Promise<void>((resolve, reject) => {
                     server.once('close', resolve);
@@ -109,32 +109,44 @@ describe('ipc-mock', () => {
 
     it('server should handle multiple client connections', async () => {
         let connectionCount = 0;
-        server = createServer((socket) => {
+        server = createServer((socket) => { // Use the socket passed to the listener
             connectionCount++;
-            socket.on('data', (data) => socket.write(data.toString().toUpperCase())); // Echo server
+            // Set up echo handler ON the server-side socket for THIS connection
+            socket.on('data', (data) => {
+                if (!socket.destroyed) {
+                    socket.write(data.toString().toUpperCase());
+                }
+            });
         });
         await new Promise<void>(resolve => server.listen(TEST_SOCKET_PATH, resolve));
 
         const client1 = createConnection(TEST_SOCKET_PATH);
         const client2 = createConnection(TEST_SOCKET_PATH);
 
+        // NO specific data handlers needed on clients for echo test
+        // client1.on('data', (data) => client1.write(data.toString().toUpperCase())); // REMOVED
+        // client2.on('data', (data) => client2.write(data.toString().toUpperCase())); // REMOVED
+
         await Promise.all([
             new Promise<void>(resolve => client1.once('connect', resolve)),
             new Promise<void>(resolve => client2.once('connect', resolve)),
         ]);
 
-        expect(connectionCount).toBe(2);
-
         const response1Promise = new Promise<string>(resolve => client1.once('data', data => resolve(data.toString())));
         const response2Promise = new Promise<string>(resolve => client2.once('data', data => resolve(data.toString())));
 
+        // Send data from clients to the server
         client1.write('hello');
         client2.write('world');
+
+        // The 'data' listeners on client1 and client2 will receive the echoed (uppercased) data FROM THE SERVER.
 
         const [response1, response2] = await Promise.all([response1Promise, response2Promise]);
 
         expect(response1).toBe('HELLO');
         expect(response2).toBe('WORLD');
+
+        expect(server._connections.size).toBe(2); // Verify internal tracking on server
 
         client1.destroy();
         client2.destroy();
