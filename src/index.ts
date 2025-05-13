@@ -57,7 +57,7 @@ const INPUT_SEND_ERROR_NO_SERVER = "CHOPUP_INPUT_SEND_ERROR_NO_SERVER";
 async function setupWatcher(
 	watchPath: string,
 	getSocketPath: () => string | null,
-	logger: typeof log,
+	logger: (...args: unknown[]) => void,
 	errorLogger: typeof logError,
 ) {
 	logger(`Watcher: Attempting to watch ${watchPath}`);
@@ -104,7 +104,7 @@ async function setupWatcher(
 async function performInitialSend(
 	input: string,
 	getSocketPath: () => string | null,
-	logger: typeof log,
+	logger: (...args: unknown[]) => void,
 	errorLogger: typeof logError,
 	warnLogger: typeof logWarn,
 ) {
@@ -192,13 +192,28 @@ async function mainAction(
 	);
 
 	if (effectiveCommandName === "run") {
-		const commandToRun = commandArgsFromAction[0];
-		const Cargs = commandArgsFromAction.slice(1);
+		let commandToRunActual: string;
+		let CargsActual: string[];
 
-		if (!commandToRun) {
-			logError("Error: No command specified for 'run'.");
+		if (commandArgsFromAction.length === 0) {
+			logError("Error: No command arguments provided for 'run'.");
 			this.help();
 			process.exit(1);
+			return;
+		}
+
+		if (commandArgsFromAction[0] === "--") {
+			if (commandArgsFromAction.length < 2) {
+				logError("Error: No command specified after '--' for 'run'.");
+				this.help();
+				process.exit(1);
+				return;
+			}
+			commandToRunActual = commandArgsFromAction[1];
+			CargsActual = commandArgsFromAction.slice(2);
+		} else {
+			commandToRunActual = commandArgsFromAction[0];
+			CargsActual = commandArgsFromAction.slice(1);
 		}
 
 		if (!fsSync.existsSync(logDir)) {
@@ -215,13 +230,13 @@ async function mainAction(
 
 		log(
 			combinedOptions.verbose as boolean,
-			`Run: Command = '${commandToRun}', Args = '${Cargs.join(" ")}', LogDir = '${logDir}', SocketForServer = '${socketPathOption || "Default"}'`,
+			`Run: Command = '${commandToRunActual}', Args = '${CargsActual.join(" ")}', LogDir = '${logDir}', SocketForServer = '${socketPathOption || "Default"}'`,
 		);
 
 		// Log the values for debugging
 		log(
 			combinedOptions.verbose as boolean,
-			`commandToRun: ${commandToRun}, args: ${Cargs.join(" ")}`,
+			`commandToRun: ${commandToRunActual}, args: ${CargsActual.join(" ")}`,
 		);
 		log(
 			combinedOptions.verbose as boolean,
@@ -229,8 +244,8 @@ async function mainAction(
 		);
 		log(combinedOptions.verbose as boolean, `logDir: ${logDir}, type: ${typeof logDir}`);
 
-		const chopupInstance = new Chopup([commandToRun, ...Cargs], {
-			command: [commandToRun, ...Cargs],
+		const chopupInstance = new Chopup([commandToRunActual, ...CargsActual], {
+			command: [commandToRunActual, ...CargsActual],
 			logDir: logDir,
 			socketPath: socketPathOption as string,
 			verbose: combinedOptions.verbose as boolean,

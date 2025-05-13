@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import treeKill from "tree-kill";
 
+import { INSTRUCTIONS_TEMPLATE } from "./messages";
+
 // Correct SpawnFunction signature to match ChildProcess types
 export type SpawnFunction = (
 	command: string,
@@ -413,10 +415,10 @@ export class Chopup {
 				const isTestMode = process.env.CHOPUP_TEST_MODE === "true";
 				if (!isTestMode) { // Don't show instructions in test mode to keep stdout clean for tests
 					const execName = process.env.CHOPUP_EXEC_NAME || "chopup"; // Or npx chopup, etc.
-					this.logToConsole("--- Chopup Control ---\n");
-					this.logToConsole(`To request logs: ${execName} request-logs --socket ${this.socketPath}\n`);
-					this.logToConsole(`To send input:   ${execName} send-input --socket ${this.socketPath} --input "your text here"\n`);
-					this.logToConsole("----------------------\n");
+					const instructions = INSTRUCTIONS_TEMPLATE
+						.replace(/{execName}/g, execName)
+						.replace(/{socketPath}/g, this.socketPath);
+					this.logToConsole(instructions);
 				}
 			};
 
