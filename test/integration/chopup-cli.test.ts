@@ -1,365 +1,449 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import path from 'node:path';
-import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
-import { spawn, execSync } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import treeKill from 'tree-kill'; // For cleanup
+import { execSync, spawn } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import fsSync from "node:fs";
+import fs from "node:fs/promises";
+import path from "node:path";
+import treeKill from "tree-kill"; // For cleanup
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+} from "vitest";
 
-const CHOPUP_DIST_PATH = path.resolve(__dirname, '../../dist/index.js');
-const TMP_DIR_INTEGRATION = path.resolve(__dirname, '../../tmp/integration');
-const SCRIPTS_DIR = path.join(__dirname, 'input-tests/fixtures/scripts');
+const CHOPUP_DIST_PATH = path.resolve(__dirname, "../../dist/index.js");
+const TMP_DIR_INTEGRATION = path.resolve(__dirname, "../../tmp/integration");
+const SCRIPTS_DIR = path.join(__dirname, "input-tests/fixtures/scripts");
 console.log(`[TEST CONFIG] CHOPUP_DIST_PATH: ${CHOPUP_DIST_PATH}`);
 console.log(`[TEST CONFIG] TMP_DIR_INTEGRATION: ${TMP_DIR_INTEGRATION}`);
 console.log(`[TEST CONFIG] SCRIPTS_DIR: ${SCRIPTS_DIR}`);
 
 interface ChopupTestInstance {
-    process: ChildProcessWithoutNullStreams;
-    socketPath?: string;
-    logDir: string;
-    stdout: string[];
-    stderr: string[];
-    pid: number;
-    kill: () => Promise<void>;
-    cleanup: () => Promise<void>;
+	process: ChildProcessWithoutNullStreams;
+	socketPath?: string;
+	logDir: string;
+	stdout: string[];
+	stderr: string[];
+	pid: number;
+	kill: () => Promise<void>;
+	cleanup: () => Promise<void>;
 }
 
 // Helper to spawn the chopup CLI
-async function spawnChopup(args: string[], timeoutMs = 10000): Promise<ChopupTestInstance> {
-    return new Promise((resolve, reject) => {
-        const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        const logDir = path.join(TMP_DIR_INTEGRATION, `logs-${uniqueId}`);
-        // Generate a unique socket path for this instance
-        const instanceSocketPath = path.join(TMP_DIR_INTEGRATION, `test-sock-${uniqueId}.sock`);
+async function spawnChopup(
+	args: string[],
+	timeoutMs = 10000,
+): Promise<ChopupTestInstance> {
+	return new Promise((resolve, reject) => {
+		const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+		const logDir = path.join(TMP_DIR_INTEGRATION, `logs-${uniqueId}`);
+		// Generate a unique socket path for this instance
+		const instanceSocketPath = path.join(
+			TMP_DIR_INTEGRATION,
+			`test-sock-${uniqueId}.sock`,
+		);
 
-        fsSync.mkdirSync(logDir, { recursive: true });
-        // Also ensure parent dir for socket exists if it's in TMP_DIR_INTEGRATION directly
-        fsSync.mkdirSync(path.dirname(instanceSocketPath), { recursive: true });
+		fsSync.mkdirSync(logDir, { recursive: true });
+		// Also ensure parent dir for socket exists if it's in TMP_DIR_INTEGRATION directly
+		fsSync.mkdirSync(path.dirname(instanceSocketPath), { recursive: true });
 
-        // Pass the specific socket path along with other args
-        // Options for 'run' must come BEFORE '--' and the command to wrap
-        let finalArgs: string[];
-        if (args[0] === 'run') {
-            const runCmd = args[0];
-            const separatorIndex = args.indexOf('--');
-            if (separatorIndex !== -1) {
-                const commandToWrap = args.slice(separatorIndex); // Includes '--'
-                const runArgsOnly = args.slice(1, separatorIndex);
-                finalArgs = [runCmd, ...runArgsOnly, '--log-dir', logDir, '--socket-path', instanceSocketPath, ...commandToWrap];
-            } else {
-                // case: chopup run actual_cmd (no --)
-                finalArgs = [runCmd, '--log-dir', logDir, '--socket-path', instanceSocketPath, '--', ...args.slice(1)];
-            }
-        } else {
-            // Passthrough case or direct command like request-logs (which takes --socket directly)
-            // For request-logs, its own options handling will pick up --socket, so just pass through.
-            // This block assumes if args[0] is not 'run', then it's a passthrough or a different command.
-            // If it were a global option for chopup itself, it would be program.opts().
-            // This logic might need refinement if global options are intended to be mixed with command arguments here.
-            finalArgs = [...args, '--log-dir', logDir, '--socket-path', instanceSocketPath];
-        }
+		// Pass the specific socket path along with other args
+		// Options for 'run' must come BEFORE '--' and the command to wrap
+		let finalArgs: string[];
+		if (args[0] === "run") {
+			const runCmd = args[0];
+			const separatorIndex = args.indexOf("--");
+			if (separatorIndex !== -1) {
+				const commandToWrap = args.slice(separatorIndex); // Includes '--'
+				const runArgsOnly = args.slice(1, separatorIndex);
+				finalArgs = [
+					runCmd,
+					...runArgsOnly,
+					"--log-dir",
+					logDir,
+					"--socket-path",
+					instanceSocketPath,
+					...commandToWrap,
+				];
+			} else {
+				// case: chopup run actual_cmd (no --)
+				finalArgs = [
+					runCmd,
+					"--log-dir",
+					logDir,
+					"--socket-path",
+					instanceSocketPath,
+					"--",
+					...args.slice(1),
+				];
+			}
+		} else {
+			// Passthrough case or direct command like request-logs (which takes --socket directly)
+			// For request-logs, its own options handling will pick up --socket, so just pass through.
+			// This block assumes if args[0] is not 'run', then it's a passthrough or a different command.
+			// If it were a global option for chopup itself, it would be program.opts().
+			// This logic might need refinement if global options are intended to be mixed with command arguments here.
+			finalArgs = [
+				...args,
+				"--log-dir",
+				logDir,
+				"--socket-path",
+				instanceSocketPath,
+			];
+		}
 
-        console.log(`[TEST_SPAWN] Spawning with: node ${CHOPUP_DIST_PATH} ${finalArgs.join(' ')}`); // DEBUG
+		console.log(
+			`[TEST_SPAWN] Spawning with: node ${CHOPUP_DIST_PATH} ${finalArgs.join(" ")}`,
+		); // DEBUG
 
-        const proc = spawn('node', [CHOPUP_DIST_PATH, ...finalArgs], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, CHOPUP_CLI_VERBOSE: 'true', CHOPUP_TEST_MODE: 'true' },
-        });
+		const proc = spawn("node", [CHOPUP_DIST_PATH, ...finalArgs], {
+			stdio: ["pipe", "pipe", "pipe"],
+			env: {
+				...process.env,
+				CHOPUP_CLI_VERBOSE: "true",
+				CHOPUP_TEST_MODE: "true",
+			},
+		});
 
-        let socketPath: string | undefined;
-        const stdoutData: string[] = [];
-        const stderrData: string[] = [];
-        let resolved = false;
-        let socketPathFound = false;
-        let processReadySignalReceived = false;
+		let socketPath: string | undefined;
+		const stdoutData: string[] = [];
+		const stderrData: string[] = [];
+		let resolved = false;
+		let socketPathFound = false;
+		let processReadySignalReceived = false;
 
-        const timer = setTimeout(() => {
-            if (!resolved) {
-                proc.kill();
-                reject(new Error(`spawnChopup timed out after ${timeoutMs}ms for command: node ${CHOPUP_DIST_PATH} ${finalArgs.join(' ')}`));
-            }
-        }, timeoutMs);
+		const timer = setTimeout(() => {
+			if (!resolved) {
+				proc.kill();
+				reject(
+					new Error(
+						`spawnChopup timed out after ${timeoutMs}ms for command: node ${CHOPUP_DIST_PATH} ${finalArgs.join(" ")}`,
+					),
+				);
+			}
+		}, timeoutMs);
 
-        proc.stdout.on('data', (data) => {
-            const line = data.toString();
-            stdoutData.push(line);
+		proc.stdout.on("data", (data) => {
+			const line = data.toString();
+			stdoutData.push(line);
 
-            // Match socket path and aggressively strip any trailing newlines or whitespace
-            // The socket path is now explicitly passed, but we still listen for CHOPUP_SOCKET_PATH for confirmation if needed.
-            const socketMatch = line.match(/CHOPUP_SOCKET_PATH=([^\n\r]+)/);
-            if (socketMatch?.[1]) {
-                // Clean the socket path - remove all whitespace, newlines, CR, etc.
-                const reportedSocketPath = socketMatch[1].trim();
-                // socketPath = reportedSocketPath; // We use the explicitly passed one now
-                console.log(`[TEST DEBUG] Reported socket path by instance: "${reportedSocketPath}" (using explicit: "${instanceSocketPath}")`);
-                if (reportedSocketPath.trim() === instanceSocketPath.trim()) {
-                    socketPathFound = true; // Confirmed instance is using the path we told it to
-                }
-            }
+			// Match socket path and aggressively strip any trailing newlines or whitespace
+			// The socket path is now explicitly passed, but we still listen for CHOPUP_SOCKET_PATH for confirmation if needed.
+			const socketMatch = line.match(/CHOPUP_SOCKET_PATH=([^\n\r]+)/);
+			if (socketMatch?.[1]) {
+				// Clean the socket path - remove all whitespace, newlines, CR, etc.
+				const reportedSocketPath = socketMatch[1].trim();
+				// socketPath = reportedSocketPath; // We use the explicitly passed one now
+				console.log(
+					`[TEST DEBUG] Reported socket path by instance: "${reportedSocketPath}" (using explicit: "${instanceSocketPath}")`,
+				);
+				if (reportedSocketPath.trim() === instanceSocketPath.trim()) {
+					socketPathFound = true; // Confirmed instance is using the path we told it to
+				}
+			}
 
-            // Check for ready signal
-            if (line.includes("[chopup_wrapper] CHOPUP_PROCESS_READY")) {
-                processReadySignalReceived = true;
-                console.log('[TEST DEBUG] Process ready signal received');
-            }
+			// Check for ready signal
+			if (line.includes("[chopup_wrapper] CHOPUP_PROCESS_READY")) {
+				processReadySignalReceived = true;
+				console.log("[TEST DEBUG] Process ready signal received");
+			}
 
-            // Resolve only when both signals are received
-            if (socketPathFound && processReadySignalReceived && !resolved) {
-                resolved = true;
-                clearTimeout(timer); // Clear the main timeout
+			// Resolve only when both signals are received
+			if (socketPathFound && processReadySignalReceived && !resolved) {
+				resolved = true;
+				clearTimeout(timer); // Clear the main timeout
 
-                // Verify socket exists immediately using the known instanceSocketPath
-                if (fsSync.existsSync(instanceSocketPath)) {
-                    console.log(`[TEST DEBUG] Socket path verified to exist: ${instanceSocketPath}`);
-                } else {
-                    console.warn(`[TEST WARN] Explicit socket path ${instanceSocketPath} doesn\'t exist yet upon readiness signals!`);
-                }
+				// Verify socket exists immediately using the known instanceSocketPath
+				if (fsSync.existsSync(instanceSocketPath)) {
+					console.log(
+						`[TEST DEBUG] Socket path verified to exist: ${instanceSocketPath}`,
+					);
+				} else {
+					console.warn(
+						`[TEST WARN] Explicit socket path ${instanceSocketPath} doesn\'t exist yet upon readiness signals!`,
+					);
+				}
 
-                resolve({
-                    process: proc,
-                    socketPath: instanceSocketPath, // Use the explicitly passed and generated path
-                    logDir,
-                    stdout: stdoutData,
-                    stderr: stderrData,
-                    pid: proc.pid ?? -1,
-                    kill: () => new Promise<void>((res, rej) => {
-                        if (proc.pid) {
-                            treeKill(proc.pid, (err) => err ? rej(err) : res())
-                        } else {
-                            res(); // Already dead
-                        }
-                    }),
-                    cleanup: async () => {
-                        if (proc && !proc.killed) {
-                            proc.kill(); // Send SIGTERM
-                            // Optionally wait a bit or check if it exited gracefully
-                            await new Promise(resolve => setTimeout(resolve, 200)); // Wait briefly
-                            if (!proc.killed) {
-                                proc.kill('SIGKILL'); // Force kill if still running
-                            }
-                        }
-                        // Main process handles socket cleanup on exit
-                        // But we should clean up the log dir created by the test helper
-                        if (logDir && fsSync.existsSync(logDir)) {
-                            console.log(`[TEST_CLEANUP] Removing log dir: ${logDir}`);
-                            fsSync.rmSync(logDir, { recursive: true, force: true });
-                        }
-                    }
-                });
-            }
-        });
+				resolve({
+					process: proc,
+					socketPath: instanceSocketPath, // Use the explicitly passed and generated path
+					logDir,
+					stdout: stdoutData,
+					stderr: stderrData,
+					pid: proc.pid ?? -1,
+					kill: () =>
+						new Promise<void>((res, rej) => {
+							if (proc.pid) {
+								treeKill(proc.pid, (err) => (err ? rej(err) : res()));
+							} else {
+								res(); // Already dead
+							}
+						}),
+					cleanup: async () => {
+						if (proc && !proc.killed) {
+							proc.kill(); // Send SIGTERM
+							// Optionally wait a bit or check if it exited gracefully
+							await new Promise((resolve) => setTimeout(resolve, 200)); // Wait briefly
+							if (!proc.killed) {
+								proc.kill("SIGKILL"); // Force kill if still running
+							}
+						}
+						// Main process handles socket cleanup on exit
+						// But we should clean up the log dir created by the test helper
+						if (logDir && fsSync.existsSync(logDir)) {
+							console.log(`[TEST_CLEANUP] Removing log dir: ${logDir}`);
+							fsSync.rmSync(logDir, { recursive: true, force: true });
+						}
+					},
+				});
+			}
+		});
 
-        // Keep stderr listener simple for collecting data, not for resolving readiness
-        proc.stderr.on('data', (data) => {
-            stderrData.push(data.toString());
-            // console.error(`Chopup stderr: ${data.toString()}`); // For debugging tests
-        });
+		// Keep stderr listener simple for collecting data, not for resolving readiness
+		proc.stderr.on("data", (data) => {
+			stderrData.push(data.toString());
+			// console.error(`Chopup stderr: ${data.toString()}`); // For debugging tests
+		});
 
-        proc.on('error', (err) => {
-            if (!resolved) {
-                clearTimeout(timer);
-                resolved = true;
-                reject(err);
-            }
-        });
+		proc.on("error", (err) => {
+			if (!resolved) {
+				clearTimeout(timer);
+				resolved = true;
+				reject(err);
+			}
+		});
 
-        proc.on('exit', (code, signal) => {
-            if (!resolved && instanceSocketPath) { // If exit happens quickly but after socket path was found
-                resolved = true;
-                clearTimeout(timer);
-                resolve({
-                    process: proc,
-                    socketPath: instanceSocketPath, // Use explicit path
-                    logDir,
-                    stdout: stdoutData,
-                    stderr: stderrData,
-                    pid: proc.pid || -1, // PID might be null if already exited
-                    kill: () => Promise.resolve(), // Already exited
-                    cleanup: async () => {
-                        if (proc && !proc.killed) {
-                            proc.kill(); // Send SIGTERM
-                            // Optionally wait a bit or check if it exited gracefully
-                            await new Promise(resolve => setTimeout(resolve, 200)); // Wait briefly
-                            if (!proc.killed) {
-                                proc.kill('SIGKILL'); // Force kill if still running
-                            }
-                        }
-                        // Main process handles socket cleanup on exit
-                        // But we should clean up the log dir created by the test helper
-                        if (logDir && fsSync.existsSync(logDir)) {
-                            console.log(`[TEST_CLEANUP] Removing log dir: ${logDir}`);
-                            fsSync.rmSync(logDir, { recursive: true, force: true });
-                        }
-                    }
-                });
-            } else if (!resolved) {
-                clearTimeout(timer);
-                resolved = true;
-                reject(new Error(`Chopup process exited prematurely. Code: ${code}, Signal: ${signal}. Stderr: ${stderrData.join('')}`));
-            }
-        });
-    });
+		proc.on("exit", (code, signal) => {
+			if (!resolved && instanceSocketPath) {
+				// If exit happens quickly but after socket path was found
+				resolved = true;
+				clearTimeout(timer);
+				resolve({
+					process: proc,
+					socketPath: instanceSocketPath, // Use explicit path
+					logDir,
+					stdout: stdoutData,
+					stderr: stderrData,
+					pid: proc.pid || -1, // PID might be null if already exited
+					kill: () => Promise.resolve(), // Already exited
+					cleanup: async () => {
+						if (proc && !proc.killed) {
+							proc.kill(); // Send SIGTERM
+							// Optionally wait a bit or check if it exited gracefully
+							await new Promise((resolve) => setTimeout(resolve, 200)); // Wait briefly
+							if (!proc.killed) {
+								proc.kill("SIGKILL"); // Force kill if still running
+							}
+						}
+						// Main process handles socket cleanup on exit
+						// But we should clean up the log dir created by the test helper
+						if (logDir && fsSync.existsSync(logDir)) {
+							console.log(`[TEST_CLEANUP] Removing log dir: ${logDir}`);
+							fsSync.rmSync(logDir, { recursive: true, force: true });
+						}
+					},
+				});
+			} else if (!resolved) {
+				clearTimeout(timer);
+				resolved = true;
+				reject(
+					new Error(
+						`Chopup process exited prematurely. Code: ${code}, Signal: ${signal}. Stderr: ${stderrData.join("")}`,
+					),
+				);
+			}
+		});
+	});
 }
 
 // Helper to wait for socket file to exist
-async function waitForSocket(socketPath: string, timeoutMs = 5000): Promise<void> {
-    if (!socketPath) {
-        throw new Error("Cannot wait for socket: socketPath is undefined");
-    }
+async function waitForSocket(
+	socketPath: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	if (!socketPath) {
+		throw new Error("Cannot wait for socket: socketPath is undefined");
+	}
 
-    const startTime = Date.now();
-    console.log(`[TEST_DEBUG] Waiting for socket at path: ${socketPath}`);
+	const startTime = Date.now();
+	console.log(`[TEST_DEBUG] Waiting for socket at path: ${socketPath}`);
 
-    while (Date.now() - startTime < timeoutMs) {
-        // Verify the socket still exists
-        if (fsSync.existsSync(socketPath)) {
-            console.log(`[TEST_DEBUG] Socket found: ${socketPath}`);
-            return;
-        }
-        // Wait before checking again
-        await new Promise(resolve => setTimeout(resolve, 50)); // Poll every 50ms
-    }
+	while (Date.now() - startTime < timeoutMs) {
+		// Verify the socket still exists
+		if (fsSync.existsSync(socketPath)) {
+			console.log(`[TEST_DEBUG] Socket found: ${socketPath}`);
+			return;
+		}
+		// Wait before checking again
+		await new Promise((resolve) => setTimeout(resolve, 50)); // Poll every 50ms
+	}
 
-    // One last check before giving up
-    if (fsSync.existsSync(socketPath)) {
-        console.log(`[TEST_DEBUG] Socket found on final check: ${socketPath}`);
-        return;
-    }
+	// One last check before giving up
+	if (fsSync.existsSync(socketPath)) {
+		console.log(`[TEST_DEBUG] Socket found on final check: ${socketPath}`);
+		return;
+	}
 
-    throw new Error(`Timed out waiting for socket file to exist: ${socketPath}`);
+	throw new Error(`Timed out waiting for socket file to exist: ${socketPath}`);
 }
 
-describe('Chopup CLI Integration Tests', () => {
-    let runningInstances: ChopupTestInstance[] = [];
+describe("Chopup CLI Integration Tests", () => {
+	let runningInstances: ChopupTestInstance[] = [];
 
-    beforeAll(async () => {
-        await fs.mkdir(TMP_DIR_INTEGRATION, { recursive: true });
-        // Compile chopup if dist doesn't exist or is outdated (simple check)
-        if (!fsSync.existsSync(CHOPUP_DIST_PATH)) {
-            console.log('dist/index.js not found, running pnpm build...');
-            execSync('pnpm build', { stdio: 'inherit' });
-        }
-    });
+	beforeAll(async () => {
+		await fs.mkdir(TMP_DIR_INTEGRATION, { recursive: true });
+		// Compile chopup if dist doesn't exist or is outdated (simple check)
+		if (!fsSync.existsSync(CHOPUP_DIST_PATH)) {
+			console.log("dist/index.js not found, running pnpm build...");
+			execSync("pnpm build", { stdio: "inherit" });
+		}
+	});
 
-    afterAll(async () => {
-        // await fs.rm(TMP_DIR_INTEGRATION, { recursive: true, force: true });
-        // console.log("Cleaned up integration tmp dir. Comment out above line to inspect logs.");
-    });
+	afterAll(async () => {
+		// await fs.rm(TMP_DIR_INTEGRATION, { recursive: true, force: true });
+		// console.log("Cleaned up integration tmp dir. Comment out above line to inspect logs.");
+	});
 
-    afterEach(async () => {
-        // Clean up any instances that might be running
-        for (const instance of runningInstances) {
-            await instance.kill();
-        }
-        runningInstances = [];
-    });
+	afterEach(async () => {
+		// Clean up any instances that might be running
+		for (const instance of runningInstances) {
+			await instance.kill();
+		}
+		runningInstances = [];
+	});
 
-    describe('run subcommand (default)', () => {
-        it('should spawn a command, create a log directory, and start an IPC server', async () => {
-            const instance = await spawnChopup(['run', '--', 'echo', 'hello world']);
-            runningInstances.push(instance);
+	describe("run subcommand (default)", () => {
+		it("should spawn a command, create a log directory, and start an IPC server", async () => {
+			const instance = await spawnChopup(["run", "--", "echo", "hello world"]);
+			runningInstances.push(instance);
 
-            expect(instance.pid).toBeGreaterThan(0);
-            expect(instance.socketPath).toBeDefined();
-            expect(fsSync.existsSync(instance.logDir)).toBe(true);
+			expect(instance.pid).toBeGreaterThan(0);
+			expect(instance.socketPath).toBeDefined();
+			expect(fsSync.existsSync(instance.logDir)).toBe(true);
 
-            // Wait for the socket file to exist
-            if (instance.socketPath) {
-                await waitForSocket(instance.socketPath, 5000);
-                expect(fsSync.existsSync(instance.socketPath)).toBe(true);
-            }
+			// Wait for the socket file to exist
+			if (instance.socketPath) {
+				await waitForSocket(instance.socketPath, 5000);
+				expect(fsSync.existsSync(instance.socketPath)).toBe(true);
+			}
 
-            // Check for child process output eventually
-            await new Promise(resolve => setTimeout(resolve, 200)); // Give time for echo to run
-            const stdoutCombined = instance.stdout.join('');
-            expect(stdoutCombined).toContain('hello world');
+			// Check for child process output eventually
+			await new Promise((resolve) => setTimeout(resolve, 200)); // Give time for echo to run
+			const stdoutCombined = instance.stdout.join("");
+			expect(stdoutCombined).toContain("hello world");
 
-            await instance.kill();
-            // Socket should be cleaned up by chopup itself on exit
-            if (instance.socketPath) {
-                expect(fsSync.existsSync(instance.socketPath)).toBe(false);
-            }
-        }, 10000);
-    });
+			await instance.kill();
+			// Socket should be cleaned up by chopup itself on exit
+			if (instance.socketPath) {
+				expect(fsSync.existsSync(instance.socketPath)).toBe(false);
+			}
+		}, 10000);
+	});
 
-    describe('request-logs CLI command', () => {
-        it('should request logs from a running chopup instance and create a log chop file', async () => {
-            const targetScript = path.join(SCRIPTS_DIR, 'continuous-output.js');
-            console.log(`[TEST SETUP] Using script at: ${targetScript}`);
-            console.log(`[TEST SETUP] Verifying script exists: ${fsSync.existsSync(targetScript)}`);
+	describe("request-logs CLI command", () => {
+		it("should request logs from a running chopup instance and create a log chop file", async () => {
+			const targetScript = path.join(SCRIPTS_DIR, "continuous-output.js");
+			console.log(`[TEST SETUP] Using script at: ${targetScript}`);
+			console.log(
+				`[TEST SETUP] Verifying script exists: ${fsSync.existsSync(targetScript)}`,
+			);
 
-            const instance = await spawnChopup(['run', '--', 'node', targetScript]);
-            runningInstances.push(instance);
+			const instance = await spawnChopup(["run", "--", "node", targetScript]);
+			runningInstances.push(instance);
 
-            // Wait for child to maybe produce some logs
-            await new Promise(resolve => setTimeout(resolve, 2000));
+			// Wait for child to maybe produce some logs
+			await new Promise((resolve) => setTimeout(resolve, 2000));
 
-            const sockPath = instance.socketPath;
-            if (!sockPath) throw new Error("Socket path not found after spawn");
-            const logDir = instance.logDir;
-            if (!logDir) throw new Error("Log directory not found after spawn");
+			const sockPath = instance.socketPath;
+			if (!sockPath) throw new Error("Socket path not found after spawn");
+			const logDir = instance.logDir;
+			if (!logDir) throw new Error("Log directory not found after spawn");
 
-            try {
-                console.log(`[TEST_DEBUG] Waiting for socket at path: ${sockPath}`);
-                await waitForSocket(sockPath); // Ensure socket exists before command
-                console.log(`[TEST_DEBUG] Socket found: ${sockPath}`);
+			try {
+				console.log(`[TEST_DEBUG] Waiting for socket at path: ${sockPath}`);
+				await waitForSocket(sockPath); // Ensure socket exists before command
+				console.log(`[TEST_DEBUG] Socket found: ${sockPath}`);
 
-                console.log(`[TEST INFO] Verified socket exists: ${sockPath}`);
-                console.log(`[TEST DEBUG] Log directory BEFORE request-logs: ${fsSync.readdirSync(logDir).join(', ') || '(empty)'}`);
+				console.log(`[TEST INFO] Verified socket exists: ${sockPath}`);
+				console.log(
+					`[TEST DEBUG] Log directory BEFORE request-logs: ${fsSync.readdirSync(logDir).join(", ") || "(empty)"}`,
+				);
 
-                // Execute request-logs command
-                try {
-                    const output = execSync(`node ${CHOPUP_DIST_PATH} request-logs --socket ${sockPath}`, {
-                        timeout: 5000,
-                        encoding: 'utf8'
-                    });
-                    console.log(`[TEST INFO] Command output: ${output}`);
-                    expect(output.trim()).toContain('LOGS_CHOPPED');
-                } catch (err: unknown) {
-                    console.error(`[TEST ERROR] Command execution failed: ${(err as Error).message}`);
-                    if (err && typeof err === 'object' && 'stdout' in err) {
-                        console.log(`[TEST ERROR] Command stdout: ${(err as { stdout: Buffer | string }).stdout?.toString()}`);
-                    }
-                    if (err && typeof err === 'object' && 'stderr' in err) {
-                        console.error(`[TEST ERROR] Command stderr: ${(err as { stderr: Buffer | string }).stderr?.toString()}`);
-                    }
-                    throw err;
-                }
+				// Execute request-logs command
+				try {
+					const output = execSync(
+						`node ${CHOPUP_DIST_PATH} request-logs --socket ${sockPath}`,
+						{
+							timeout: 5000,
+							encoding: "utf8",
+						},
+					);
+					console.log(`[TEST INFO] Command output: ${output}`);
+					expect(output.trim()).toContain("LOGS_CHOPPED");
+				} catch (err: unknown) {
+					console.error(
+						`[TEST ERROR] Command execution failed: ${(err as Error).message}`,
+					);
+					if (err && typeof err === "object" && "stdout" in err) {
+						console.log(
+							`[TEST ERROR] Command stdout: ${(err as { stdout: Buffer | string }).stdout?.toString()}`,
+						);
+					}
+					if (err && typeof err === "object" && "stderr" in err) {
+						console.error(
+							`[TEST ERROR] Command stderr: ${(err as { stderr: Buffer | string }).stderr?.toString()}`,
+						);
+					}
+					throw err;
+				}
 
-                console.log(`[TEST DEBUG] Log directory immediately AFTER request-logs: ${fsSync.readdirSync(logDir).join(', ') || '(empty)'}`);
+				console.log(
+					`[TEST DEBUG] Log directory immediately AFTER request-logs: ${fsSync.readdirSync(logDir).join(", ") || "(empty)"}`,
+				);
 
-                // --- BEGIN POLLING FOR LOG FILE ---
-                const pollStartTime = Date.now();
-                const pollTimeout = 3000; // Max wait 3 seconds
-                let logFiles: string[] = [];
+				// --- BEGIN POLLING FOR LOG FILE ---
+				const pollStartTime = Date.now();
+				const pollTimeout = 3000; // Max wait 3 seconds
+				let logFiles: string[] = [];
 
-                while (Date.now() - pollStartTime < pollTimeout) {
-                    const filesInDir = fsSync.readdirSync(logDir);
-                    console.log(`[TEST POLLING] Files in ${logDir}: ${filesInDir.join(', ') || '(empty)'}`); // Log all files
-                    logFiles = filesInDir.filter(f => f.includes('_log'));
-                    if (logFiles.length > 0) {
-                        console.log(`[TEST DEBUG] Found log file(s) after ${Date.now() - pollStartTime}ms: ${logFiles.join(', ')}`);
-                        break;
-                    }
-                    // Wait a short interval before checking again
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                }
-                // --- END POLLING FOR LOG FILE ---
+				while (Date.now() - pollStartTime < pollTimeout) {
+					const filesInDir = fsSync.readdirSync(logDir);
+					console.log(
+						`[TEST POLLING] Files in ${logDir}: ${filesInDir.join(", ") || "(empty)"}`,
+					); // Log all files
+					logFiles = filesInDir.filter((f) => f.includes("_log"));
+					if (logFiles.length > 0) {
+						console.log(
+							`[TEST DEBUG] Found log file(s) after ${Date.now() - pollStartTime}ms: ${logFiles.join(", ")}`,
+						);
+						break;
+					}
+					// Wait a short interval before checking again
+					await new Promise((resolve) => setTimeout(resolve, 100));
+				}
+				// --- END POLLING FOR LOG FILE ---
 
-                console.log(`[TEST DEBUG] Final check - Log directory: ${logDir}`);
-                console.log(`[TEST DEBUG] Final check - Contents of log directory: ${fsSync.readdirSync(logDir).join(', ') || '(empty)'}`);
-                console.log(`[TEST DEBUG] Final check - Log files found (containing '_log'): ${logFiles.length}`);
+				console.log(`[TEST DEBUG] Final check - Log directory: ${logDir}`);
+				console.log(
+					`[TEST DEBUG] Final check - Contents of log directory: ${fsSync.readdirSync(logDir).join(", ") || "(empty)"}`,
+				);
+				console.log(
+					`[TEST DEBUG] Final check - Log files found (containing '_log'): ${logFiles.length}`,
+				);
 
-                expect(logFiles.length).toBeGreaterThan(0);
-            } finally {
-                // Ensure we clean up the instance at the end of the test
-                await instance.kill();
-            }
-        }, 10000); // Test timeout
-    });
+				expect(logFiles.length).toBeGreaterThan(0);
+			} finally {
+				// Ensure we clean up the instance at the end of the test
+				await instance.kill();
+			}
+		}, 10000); // Test timeout
+	});
 
-    // Comment out other tests to run them one at a time
-    /*
+	// Comment out other tests to run them one at a time
+	/*
     describe('send-input CLI command', () => {
         it('should send input to the wrapped process via CLI', async () => {
             const targetScript = path.join(SCRIPTS_DIR, 'stdin-echo.js');
@@ -423,4 +507,4 @@ describe('Chopup CLI Integration Tests', () => {
         }, 15000);
     });
     */
-}); 
+});
