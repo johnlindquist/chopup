@@ -7,6 +7,16 @@ settings:
 importers:
 
   .:
+    dependencies:
+      chokidar:
+        specifier: ^4.0.3
+        version: 4.0.3
+      commander:
+        specifier: ^13.1.0
+        version: 13.1.0
+      tree-kill:
+        specifier: ^1.2.2
+        version: 1.2.2
     devDependencies:
       '@biomejs/biome':
         specifier: ^1.9.4
@@ -23,12 +33,6 @@ importers:
       '@types/node':
         specifier: ^22.15.17
         version: 22.15.17
-      chokidar:
-        specifier: ^4.0.3
-        version: 4.0.3
-      commander:
-        specifier: ^13.1.0
-        version: 13.1.0
       conventional-changelog-conventionalcommits:
         specifier: ^8.0.0
         version: 8.0.0
@@ -41,9 +45,6 @@ importers:
       semantic-release:
         specifier: ^23.0.0
         version: 23.1.1(typescript@5.8.3)
-      tree-kill:
-        specifier: ^1.2.2
-        version: 1.2.2
       tsx:
         specifier: ^4.19.4
         version: 4.19.4
