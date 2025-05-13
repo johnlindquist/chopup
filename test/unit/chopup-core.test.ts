@@ -153,7 +153,7 @@ describe('Chopup core logic', () => {
         vi.useRealTimers(); // Ensure real timers for each test
         currentTestSocketPath = getTestSocketPath(); // Generate unique path per test
         // Mock fs operations
-        writeFileSpy = vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined as void);
+        writeFileSpy = vi.spyOn(fs, 'writeFile').mockResolvedValue(undefined);
         mkdirSpy = vi.spyOn(fsSync, 'mkdirSync');
         // Provide a mock implementation for unlinkSync
         unlinkSyncSpy = vi.spyOn(fsSync, 'unlinkSync').mockImplementation(() => { });
