@@ -1,3 +1,9 @@
+## [1.0.1](https://github.com/johnlindquist/chopup/compare/v1.0.0...v1.0.1) (2025-05-13)
+
+### Bug Fixes
+
+* clarify output messages in release workflow to specify semantic-release usage ([e24fd3b](https://github.com/johnlindquist/chopup/commit/e24fd3bd8662cf7fc21f905fde7aad21955df604))
+
 ## 1.0.0 (2025-05-13)
 
 ### Features
