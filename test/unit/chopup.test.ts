@@ -169,8 +169,10 @@ describe('Chopup', () => {
         // Cleanup: close server, attempt to remove socket, ensure child killed
         if (serverInstance) { // Check if serverInstance is not null
             // Accessing private members for testing cleanup is okay here
-            const server = (serverInstance as any).ipcServer as net.Server | undefined; // Changed to as any
-            const child = (serverInstance as any).childProcess as ChildProcess | null; // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            const server = (serverInstance as any).ipcServer as net.Server | undefined; 
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            const child = (serverInstance as any).childProcess as ChildProcess | null; 
 
             if (server?.listening) { 
                 console.log(`[TEST_CLEANUP] Closing server instance for socket: ${serverInstance.getSocketPath()}`); 
@@ -179,7 +181,8 @@ describe('Chopup', () => {
                 });
             }
             
-            const internalFakeChild = (serverInstance as any).currentFakeChild as FakeChildProcess | undefined; // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            const internalFakeChild = (serverInstance as any).currentFakeChild as FakeChildProcess | undefined; 
             if (child?.pid && internalFakeChild && !internalFakeChild.killed) { 
                 console.log(`[TEST_CLEANUP] Killing fake child PID ${child.pid} for socket: ${serverInstance.getSocketPath()}`); 
                 treeKill(child.pid, 'SIGTERM');
@@ -256,8 +259,10 @@ describe('Chopup', () => {
         console.log(`[TEST_HELPER] Created Chopup instance with socket: ${instance.getSocketPath()}`);
 
         // Important: Add a cleanup for the existsSync mock specific to this instance creation
-        const originalPerformFinalCleanup = (instance as any).performFinalCleanup; // Changed to as any
-        (instance as any).performFinalCleanup = async (...cleanupArgs: [number | null, NodeJS.Signals | null]) => { // Changed to as any
+        // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+        const originalPerformFinalCleanup = (instance as any).performFinalCleanup; 
+        // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+        (instance as any).performFinalCleanup = async (...cleanupArgs: [number | null, NodeJS.Signals | null]) => { 
             await originalPerformFinalCleanup.apply(instance, cleanupArgs);
             vi.spyOn(fsSync, 'existsSync').mockImplementation(originalExistsSync); // Restore original
             vi.spyOn(fsSync, 'unlinkSync').mockImplementation(originalUnlinkSync); // Restore original unlinkSync
@@ -352,7 +357,8 @@ describe('Chopup', () => {
         it('should initialize properties correctly', () => {
             const { instance: chopup } = createChopupInstance();
             expect(chopup.getSocketPath()).toBe(currentTestSocketPath);
-            expect((chopup as any).logDirectoryPath).toBe(TEST_LOG_DIR); // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            expect((chopup as any).logDirectoryPath).toBe(TEST_LOG_DIR); 
         });
 
         it('should use provided socketPath if available', () => {
@@ -491,12 +497,13 @@ describe('Chopup', () => {
         });
 
         it('should handle "request-logs" command', async () => {
-            // serverReadyPromise needs to resolve for some internal logic if run() is called.
-            // For direct handler testing, we might not need full run(), but let's ensure server is "ready".
-            (testChopup as any).resolveServerReady(); // Changed to as any
+            // Wait for server to be ready using the internal promise
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            await (testChopup as any).serverReadyPromise; 
 
             const chopLogSpy = vi.spyOn(testChopup as Chopup & { chopLog: (finalChop?: boolean | undefined) => Promise<void> }, 'chopLog');
-            (testChopup as any).logBuffer.push({ timestamp: Date.now(), type: 'stdout', line: 'test log for request\n' }); // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            (testChopup as any).logBuffer.push({ timestamp: Date.now(), type: 'stdout', line: 'test log for request\n' }); 
 
             // Simulate client connection
             mockConnectionHandler(mockClientSocket as unknown as net.Socket);
@@ -511,10 +518,12 @@ describe('Chopup', () => {
         });
 
         it('should handle "send-input" command and write to child stdin', async () => {
-            (testChopup as any).resolveServerReady(); // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            (testChopup as any).resolveServerReady(); 
             // Ensure childProcess and its stdin are set up on testChopup for this test
             // The global fakeChild is used by createChopupInstance, which sets it on the instance
-            (testChopup as any).childProcess = fakeChild as unknown as ChildProcess; // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            (testChopup as any).childProcess = fakeChild as unknown as ChildProcess; 
 
             const testInput = 'hello child';
             const stdinWriteSpy = fakeChild?.stdinWriteMock;
@@ -531,10 +540,13 @@ describe('Chopup', () => {
         });
 
         it('should handle "send-input" when child process stdin is not available', async () => {
-            (testChopup as any).resolveServerReady(); // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            (testChopup as any).resolveServerReady(); 
             const childWithoutStdin = new FakeChildProcess(false);
-            (testChopup as any).childProcess = childWithoutStdin as unknown as ChildProcess; // Changed to as any
-            expect(((testChopup as any).childProcess as ChildProcess & { stdin: unknown }).stdin).toBeNull(); // Changed to as any
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            (testChopup as any).childProcess = childWithoutStdin as unknown as ChildProcess; 
+            // biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+            expect(((testChopup as any).childProcess as ChildProcess & { stdin: unknown }).stdin).toBeNull(); 
 
             mockConnectionHandler(mockClientSocket as unknown as net.Socket);
             mockClientSocket.emit('data', JSON.stringify({ command: SEND_INPUT_COMMAND, input: 'test' }));

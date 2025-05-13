@@ -15,6 +15,7 @@ export interface ChildProcessLike extends EventEmitter {
 	kill: (signal?: NodeJS.Signals | number) => boolean;
 	disconnect?: () => void;
 	// Allow extra properties for flexibility if needed by tests
+	// biome-ignore lint/suspicious/noExplicitAny: Index signature for test double flexibility
 	[key: string]: any;
 }
 

@@ -4,12 +4,12 @@ import { Chopup, LOGS_CHOPPED, SEND_INPUT_COMMAND, REQUEST_LOGS_COMMAND, INPUT_S
 import type { SpawnFunction, ChopupOptions, NetServerConstructor, LogBufferEntry } from '../../src/chopup';
 import net from 'node:net'; // Import real net module
 import fs from 'node:fs/promises';
-import fsSync, { type PathLike, type MakeDirectoryOptions, type Mode, type WriteFileOptions } from 'node:fs'; // Consolidate fsSync imports and add WriteFileOptions
+import fsSync, { type PathLike, type MakeDirectoryOptions, type Mode, type WriteFileOptions as FsSyncWriteFileOptions, type OpenMode } from 'node:fs'; // Consolidate fsSync imports and add WriteFileOptions
 import path from 'node:path'; // Import path for socket path
 import { EventEmitter } from 'node:events'; // Added node: prefix
 import treeKill from 'tree-kill'; // Import tree-kill
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import type { WriteFileOptions as NodeFsWriteFileOptions } from "node:fs"; // Import WriteFileOptions from node:fs
+import type { Abortable, ObjectEncodingOptions } from 'node:stream'; // ObjectEncodingOptions needed
 
 // Mock tree-kill globally for this test file
 vi.mock('tree-kill', () => {
@@ -27,7 +27,23 @@ const TEST_LOG_DIR = path.join(__dirname, '../../../tmp/unit-core-logs');
 
 // Add explicit Mock types for spies, using SpyInstance for broader compatibility
 // Update signature to match fs.promises.writeFile accurately, including Stream type
-let writeFileSpy: SpyInstance<[file: PathLike | fs.FileHandle, data: string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView> | import('node:stream').Stream, options?: WriteFileOptions | undefined], Promise<void>>;
+let writeFileSpy: SpyInstance<
+    [
+        file: PathLike | fs.FileHandle,
+        data: string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView> | import('node:stream').Stream,
+        options?:
+            | BufferEncoding
+            | (ObjectEncodingOptions &
+                  Partial<{
+                      mode: Mode;
+                      flag: OpenMode; // Use OpenMode from fsSync here
+                      flush: boolean;
+                      signal: AbortSignal;
+                  }>) // Make properties optional as they are in practice for options object
+            | null,
+    ],
+    Promise<void>
+>;
 let mkdirSpy: SpyInstance<[path: PathLike, options?: Mode | (MakeDirectoryOptions & { recursive?: boolean | undefined; }) | null | undefined], string | undefined>;
 let unlinkSyncSpy: SpyInstance<[path: PathLike], void>;
 

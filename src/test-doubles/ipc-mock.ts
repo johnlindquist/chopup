@@ -37,13 +37,13 @@ export class MockDuplex extends Duplex {
 	}
 
 	_write(
-		chunk: any,
+		chunk: unknown,
 		encoding: BufferEncoding,
 		callback: (error?: Error | null) => void,
 	) {
 		this.emit("data", chunk); // Echo back
 		if (this._otherSide?._connected) {
-			this._otherSide._receiveData(chunk);
+			this._otherSide._receiveData(chunk as Buffer);
 		} else {
 			// Silently drop data if not connected or no other side? Or error?
 			// For now, let's drop silently, similar to a closed socket
@@ -309,12 +309,11 @@ export function createConnection(
 			}
 		} else {
 			// No server listening at this path
-			const error = new Error(
-				`connect ECONNREFUSED ${path}`,
-			) as NodeJS.ErrnoException;
+			const error = new Error("connect ECONNREFUSED") as NodeJS.ErrnoException;
 			error.code = "ECONNREFUSED";
 			// error.address = path; // NodeJS.ErrnoException doesn't strictly have .address, though common in net errors
-			(error as any).address = path; // Add for test compatibility if needed, acknowledge lint
+			// biome-ignore lint/suspicious/noExplicitAny: Adding property for test compatibility
+			(error as any).address = path;
 			clientSocket.emit("error", error);
 			clientSocket.destroy(error); // Ensure socket is destroyed on connection failure
 		}
