@@ -79,6 +79,17 @@ export class Chopup {
 	private spawnFn: SpawnFunction;
 	private netCreateServerFn: typeof net.createServer; // Use typeof
 
+	private debugLog(message: string, ...optionalParams: unknown[]): void {
+		if (this.verbose) {
+			const fullMessage = `[DEBUG ${new Date().toISOString()}] ${message}`;
+			if (optionalParams.length > 0) {
+				console.log(fullMessage, ...optionalParams);
+			} else {
+				console.log(fullMessage);
+			}
+		}
+	}
+
 	constructor(
 		command: string[],
 		options: ChopupOptions,
@@ -206,15 +217,15 @@ export class Chopup {
 		}
 
 		// Debug log for socket path before setup
-		console.log(
-			`[DEBUG_SOCKET] Setting up IPC server on socket: ${this.socketPath}`,
+		this.debugLog(
+			`[SOCKET] Setting up IPC server on socket: ${this.socketPath}`,
 		);
 
 		this.ipcServer = this.netCreateServerFn((socket) => {
 			this.log("IPC client connected");
-			console.error(
-				`[DEBUG_IPC_SERVER_CONNECT] Client connected to ${this.socketPath}. Remote port: ${socket.remotePort}`,
-			); // DEBUG
+			this.debugLog(
+				`[IPC_SERVER_CONNECT] Client connected to ${this.socketPath}. Remote port: ${socket.remotePort}`,
+			);
 			this.activeConnections.add(socket);
 
 			socket.on("data", async (data) => {
@@ -230,22 +241,22 @@ export class Chopup {
 						return; // Stop processing this data chunk
 					}
 
-					this.logToConsole(
-						`[DEBUG_IPC_HANDLER] Received ${commandData.command}.`,
+					this.debugLog(
+						`[IPC_HANDLER] Received ${commandData.command}.`,
 					);
 
 					switch (commandData.command) {
 						case REQUEST_LOGS_COMMAND:
-							this.logToConsole(
-								`[DEBUG_IPC_HANDLER] Received ${REQUEST_LOGS_COMMAND}. Calling chopLog...`,
+							this.debugLog(
+								`[IPC_HANDLER] Received ${REQUEST_LOGS_COMMAND}. Calling chopLog...`,
 							);
 							await this.chopLog(); // Assuming chopLog might be async now or in future
 							await this.writeToSocket(socket, LOGS_CHOPPED); // Await write
 							break;
 
 						case SEND_INPUT_COMMAND:
-							this.logToConsole(
-								`[DEBUG_IPC_HANDLER] Received ${SEND_INPUT_COMMAND}.`,
+							this.debugLog(
+								`[IPC_HANDLER] Received ${SEND_INPUT_COMMAND}.`,
 							);
 							if (this.childProcess?.stdin) {
 								const writeSuccess = this.childProcess.stdin.write(
@@ -264,8 +275,8 @@ export class Chopup {
 												),
 											);
 										} else {
-											this.logToConsole(
-												"[DEBUG_IPC_HANDLER] Successfully wrote to child stdin.",
+											this.debugLog(
+												"[IPC_HANDLER] Successfully wrote to child stdin.",
 											);
 											// Only send success if write callback confirms no error
 											this.writeToSocket(socket, INPUT_SENT).catch((e) =>
@@ -337,7 +348,7 @@ export class Chopup {
 
 		this.ipcServer.on("error", (err) => {
 			this.error(`IPC server error: ${err.message}`);
-			console.error(`[DEBUG_SOCKET] IPC server error: ${err.message}`);
+			this.debugLog(`[SOCKET] IPC server error: ${err.message}`);
 			this.rejectServerReady(err); // Reject the promise on server error
 		});
 
@@ -352,8 +363,8 @@ export class Chopup {
 						resolve();
 					} else {
 						if (attempts > 0) {
-							console.log(
-								`[DEBUG_SOCKET] Socket not found, retrying in ${delay}ms (${attempts} attempts left)`,
+							this.debugLog(
+								`[SOCKET] Socket not found, retrying in ${delay}ms (${attempts} attempts left)`,
 							);
 							setTimeout(
 								() =>
@@ -378,13 +389,13 @@ export class Chopup {
 		// Start listening
 		this.ipcServer.listen(this.socketPath, () => {
 			this.log(`IPC server is now listening on ${this.socketPath}`);
-			console.log(
-				`[DEBUG_SOCKET] IPC server is now listening on ${this.socketPath}`,
+			this.debugLog(
+				`[SOCKET] IPC server is now listening on ${this.socketPath}`,
 			);
 
 			const onServerReady = () => {
-				console.log(
-					`[DEBUG_SOCKET] Server ready sequence starting. Socket path: ${this.socketPath}`,
+				this.debugLog(
+					`[SOCKET] Server ready sequence starting. Socket path: ${this.socketPath}`,
 				);
 				// Announce socket path for clients, only if not suppressed
 				const shouldSuppressSocketPath =
@@ -396,19 +407,29 @@ export class Chopup {
 				// Announce process ready *after* server is listening AND socket file exists (or assumed in test)
 				this.logToConsole("CHOPUP_PROCESS_READY\n");
 				this.resolveServerReady();
-				console.log("[DEBUG_SOCKET] Server ready sequence completed.");
+				this.debugLog("[SOCKET] Server ready sequence completed.");
+
+				// Add user instructions
+				const isTestMode = process.env.CHOPUP_TEST_MODE === "true";
+				if (!isTestMode) { // Don't show instructions in test mode to keep stdout clean for tests
+					const execName = process.env.CHOPUP_EXEC_NAME || "chopup"; // Or npx chopup, etc.
+					this.logToConsole("--- Chopup Control ---\n");
+					this.logToConsole(`To request logs: ${execName} request-logs --socket ${this.socketPath}\n`);
+					this.logToConsole(`To send input:   ${execName} send-input --socket ${this.socketPath} --input "your text here"\n`);
+					this.logToConsole("----------------------\n");
+				}
 			};
 
 			verifySocketExistsWithRetry()
 				.then(() => {
-					console.log(
-						`[DEBUG_SOCKET] Socket file verified to exist: ${this.socketPath}`,
+					this.debugLog(
+						`[SOCKET] Socket file verified to exist: ${this.socketPath}`,
 					);
 					onServerReady(); // Call shared readiness logic after verification
 				})
 				.catch((err: Error) => {
-					console.error(
-						`[DEBUG_SOCKET] Socket verification failed: ${err.message}`,
+					this.debugLog(
+						`[SOCKET] Socket verification failed: ${err.message}`,
 					);
 					this.rejectServerReady(err);
 				});
@@ -417,15 +438,15 @@ export class Chopup {
 
 	// Make chopLog async to allow awaiting file write
 	public async chopLog(isFinalChop = false): Promise<void> {
-		console.error(
-			"[DEBUG_CHOPLOG_INVOKED] chopLog called. isFinalChop:",
+		this.debugLog(
+			"[CHOPLOG_INVOKED] chopLog called. isFinalChop:",
 			isFinalChop,
 			"Buffer length:",
 			this.logBuffer.length,
-		); // VERY EARLY DEBUG
-		console.error(
-			"[DEBUG_CHOPLOG_ENTRY] chopLog function called (logged to stderr).",
-		); // LOG TO STDERR
+		);
+		this.debugLog(
+			"[CHOPLOG_ENTRY] chopLog function called (logged to stderr).",
+		);
 		const chopTime = Date.now();
 		const logsToWrite = [...this.logBuffer]; // Create a copy
 		const lastChop = this.lastChopTime;
@@ -443,8 +464,8 @@ export class Chopup {
 		const shouldAttemptWrite = hasLogs || isFinalChop || isTestMode;
 
 		if (!shouldAttemptWrite) {
-			console.log(
-				"[DEBUG] Skipping log chop: No logs, not final chop, and not in test mode.",
+			this.debugLog(
+				"Skipping log chop: No logs, not final chop, and not in test mode.",
 			);
 			return; // Return resolved promise for skipped write
 		}
@@ -459,36 +480,36 @@ export class Chopup {
 		// Use buffer data or a test message if forced by test mode with empty buffer
 		let content = hasLogs
 			? logsToWrite
-					.map(
-						(entry) =>
-							`[${new Date(entry.timestamp).toISOString()}] [${entry.type}] ${entry.line}`,
-					)
-					.join("") // Lines already have newlines
+				.map(
+					(entry) =>
+						`[${new Date(entry.timestamp).toISOString()}] [${entry.type}] ${entry.line}`,
+				)
+				.join("") // Lines already have newlines
 			: ""; // Default to empty if no logs
 
 		// If in test mode and buffer was empty, create a minimal test message
 		if (isTestMode && !hasLogs) {
 			content = `[TEST_MODE] Empty log chop created at ${new Date(chopTime).toISOString()}\n`;
-			console.log(
-				`[DEBUG_CHOPLOG_TEST_MODE_WRITE] Forcing content for test mode. Filename: ${filename}, Content: "${content.substring(0, 50)}..."`,
-			); // DEBUG
+			this.debugLog(
+				`[CHOPLOG_TEST_MODE_WRITE] Forcing content for test mode. Filename: ${filename}, Content: "${content.substring(0, 50)}..."`,
+			);
 		}
 
 		// Avoid writing an empty file unless forced by test mode
 		if (content.length === 0) {
 			// This should only happen if not isTestMode, not isFinalChop, and logsToWrite was empty
-			console.log(
-				"[DEBUG] Skipping log chop: Content is empty and not in forced test mode.",
+			this.debugLog(
+				"Skipping log chop: Content is empty and not in forced test mode.",
 			);
 			return; // Return resolved promise for skipped write
 		}
 
 		this.log(`Chopping logs to ${filename}. Lines: ${logsToWrite.length}`);
-		console.log(
-			`[DEBUG_CHOPLOG] Chopping logs to ${filename}. Lines: ${logsToWrite.length}`,
+		this.debugLog(
+			`[CHOPLOG] Chopping logs to ${filename}. Lines: ${logsToWrite.length}`,
 		);
-		console.log(
-			`[DEBUG_CHOPLOG] Log file will ${logsToWrite.length === 0 && isTestMode ? "contain test message" : "contain actual logs"}`,
+		this.debugLog(
+			`[CHOPLOG] Log file will ${logsToWrite.length === 0 && isTestMode ? "contain test message" : "contain actual logs"}`,
 		);
 
 		// Return the promise from writeFile
@@ -496,12 +517,12 @@ export class Chopup {
 			.writeFile(filename, content)
 			.then(() => {
 				this.log(`Successfully wrote logs to ${filename}`);
-				console.log(`[DEBUG_CHOPLOG] Successfully wrote logs to ${filename}`);
+				this.debugLog(`[CHOPLOG] Successfully wrote logs to ${filename}`);
 			})
 			.catch((err) => {
 				this.error(`Error writing log file ${filename}: ${err}`);
-				console.error(
-					`[DEBUG_CHOPLOG] Error writing log file ${filename}: ${err}`,
+				this.debugLog(
+					`[CHOPLOG] Error writing log file ${filename}: ${err}`,
 				);
 				// Re-throw error so the await in the IPC handler catches it if needed
 				throw err;
@@ -587,32 +608,32 @@ export class Chopup {
 		if (this.socketPath && fsSync.existsSync(this.socketPath)) {
 			// Check if exists first
 			this.log(`Attempting to unlink socket file: ${this.socketPath}`);
-			console.log(
-				`[DEBUG_SOCKET] Attempting to unlink socket file: ${this.socketPath}`,
+			this.debugLog(
+				`[SOCKET] Attempting to unlink socket file: ${this.socketPath}`,
 			);
 			try {
-				console.log("[DEBUG_SOCKET_CLEANUP] Before await fs.unlink()"); // ADDED DEBUG
+				this.debugLog("[SOCKET_CLEANUP] Before await fs.unlink()");
 				await fs.unlink(this.socketPath);
-				console.log("[DEBUG_SOCKET_CLEANUP] After await fs.unlink()"); // ADDED DEBUG
+				this.debugLog("[SOCKET_CLEANUP] After await fs.unlink()");
 				this.log(`Socket file ${this.socketPath} unlinked successfully.`);
-				console.log(
-					`[DEBUG_SOCKET] Socket file unlinked successfully: ${this.socketPath}`,
+				this.debugLog(
+					`[SOCKET] Socket file unlinked successfully: ${this.socketPath}`,
 				);
 			} catch (err: unknown) {
 				const unlinkError = err as Error; // Type assertion
 				this.error(
 					`Error unlinking socket file ${this.socketPath}: ${unlinkError.message}`,
 				);
-				console.error(
-					`[DEBUG_SOCKET] Error unlinking socket file: ${this.socketPath}, error: ${unlinkError.message}`,
+				this.debugLog(
+					`[SOCKET] Error unlinking socket file: ${this.socketPath}, error: ${unlinkError.message}`,
 				);
 			}
 		} else {
 			this.log(
 				`Socket file ${this.socketPath} does not exist or path is null, no unlink needed.`,
 			);
-			console.log(
-				`[DEBUG_SOCKET] Socket file does not exist, no unlink needed: ${this.socketPath}`,
+			this.debugLog(
+				`[SOCKET] Socket file does not exist, no unlink needed: ${this.socketPath}`,
 			);
 		}
 	}
@@ -736,15 +757,15 @@ export class Chopup {
 				});
 
 				this.childProcess.on("exit", async (code, signal) => {
-					this.log(
-						`[DEBUG_EXIT_HANDLER_ENTRY] Child process exit event received. Code: ${code}, Signal: ${signal}. PID: ${this.childProcess?.pid}`,
+					this.debugLog(
+						`[EXIT_HANDLER_ENTRY] Child process exit event received. Code: ${code}, Signal: ${signal}. PID: ${this.childProcess?.pid}`,
 					);
 					this.log(
 						`Child process exited. Code: ${code}, Signal: ${signal}. PID: ${this.childProcess?.pid}`,
 					);
 					// Ensure cleanup happens before resolving
 					this.doCleanup(code, signal).finally(() => {
-						this.log("[DEBUG_EXIT_HANDLER] doCleanup finished.");
+						this.debugLog("[EXIT_HANDLER] doCleanup finished.");
 						const exitCodeToUse =
 							code !== null
 								? code
@@ -754,7 +775,7 @@ export class Chopup {
 						this.log(
 							`Wrapper process will now exit with code: ${exitCodeToUse}`,
 						);
-						this.log("[DEBUG_EXIT_HANDLER] Resolving run() promise.");
+						this.debugLog("[EXIT_HANDLER] Resolving run() promise.");
 						resolve(exitCodeToUse);
 					});
 				});
@@ -795,7 +816,7 @@ export class Chopup {
 	// Helper to promisify socket write with error handling
 	private writeToSocket(socket: net.Socket, message: string): Promise<void> {
 		return new Promise((resolve, reject) => {
-			this.logToConsole(`[DEBUG_IPC_SERVER] Attempting to write ${message}`);
+			this.debugLog(`[IPC_SERVER] Attempting to write ${message}`);
 			socket.write(message, (err) => {
 				if (err) {
 					this.logToConsole(
@@ -804,7 +825,7 @@ export class Chopup {
 					);
 					reject(err);
 				} else {
-					this.logToConsole(`[DEBUG_IPC_SERVER] Successfully wrote ${message}`);
+					this.debugLog(`[IPC_SERVER] Successfully wrote ${message}`);
 					resolve();
 				}
 			});
@@ -825,7 +846,9 @@ function parseJsonSafely(jsonString: string): unknown {
 	try {
 		return JSON.parse(jsonString);
 	} catch (error) {
-		console.error(`Error parsing JSON: ${error}`);
+		// Replaced console.error with a non-verbose log or handle differently
+		// For now, let's assume this specific error should always be visible if it occurs
+		console.error(`[CHOPUP_JSON_PARSE_ERROR] Error parsing JSON: ${error}`);
 		return null;
 	}
 }
