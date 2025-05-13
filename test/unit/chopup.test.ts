@@ -546,7 +546,8 @@ describe("Chopup", () => {
 
 			const runPromise = chopup.run();
 			// Wait for server to be ready using the internal promise
-			await (chopup as any).serverReadyPromise; // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			await (chopup as any).serverReadyPromise;
 
 			expect(initializeSignalHandlersSpy).toHaveBeenCalled();
 			expect(setupIpcServerSpy).toHaveBeenCalled();
@@ -582,7 +583,8 @@ describe("Chopup", () => {
 			);
 			const runPromise = chopup.run();
 
-			await (chopup as any).serverReadyPromise; // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			await (chopup as any).serverReadyPromise;
 
 			// Advance timers to allow for async operations like process.nextTick within server ready sequence
 			await vi.advanceTimersToNextTimerAsync();
@@ -625,7 +627,8 @@ describe("Chopup", () => {
 				createChopupInstance();
 			testChopup = instance;
 			serverInstance = instance; // Track for afterEach cleanup
-			(testChopup as any).setupIpcServer(); // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			(testChopup as any).setupIpcServer();
 			const handler = getMockServerConnectionHandler();
 			if (!handler) {
 				throw new Error("Connection handler not set up on mock server");
@@ -640,10 +643,12 @@ describe("Chopup", () => {
 			// and the beforeEach block. We can refine this test if needed.
 			const { instance } = createChopupInstance(); // Use a fresh one for this specific test scope
 			const runPromise = instance.run();
-			await (instance as any).serverReadyPromise; // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			await (instance as any).serverReadyPromise;
 
 			// Verify netCreateServerFn was called from the instance's injected dependency
-			const createServerFnSpy = vi.mocked((instance as any).netCreateServerFn); // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			const createServerFnSpy = vi.mocked((instance as any).netCreateServerFn);
 			expect(createServerFnSpy).toHaveBeenCalled();
 			const actualMockedServer = createServerFnSpy.mock.results[0]
 				.value as net.Server; // cast to net.Server
@@ -753,7 +758,8 @@ describe("Chopup", () => {
 		});
 
 		it("should handle unknown IPC command", async () => {
-			(testChopup as any).resolveServerReady(); // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			(testChopup as any).resolveServerReady();
 			mockConnectionHandler(mockClientSocket as unknown as net.Socket);
 			mockClientSocket.emit(
 				"data",
@@ -769,7 +775,8 @@ describe("Chopup", () => {
 		});
 
 		it("should handle IPC data parse error", async () => {
-			(testChopup as any).resolveServerReady(); // Changed to as any
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
+			(testChopup as any).resolveServerReady();
 			mockConnectionHandler(mockClientSocket as unknown as net.Socket);
 			mockClientSocket.emit("data", "invalid json"); // Send invalid JSON directly
 
@@ -799,6 +806,7 @@ describe("Chopup", () => {
 			>;
 
 			const runPromise = localChopupInstance.run();
+			// biome-ignore lint/suspicious/noExplicitAny: Accessing private member for testing
 			await (localChopupInstance as any).serverReadyPromise; // Wait for setup to complete
 
 			expect(unlinkSyncSpy).toHaveBeenCalledWith(currentTestSocketPath);
