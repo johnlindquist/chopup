@@ -532,7 +532,16 @@ export class Chopup {
 	}
 
 	private recordOutput(data: Buffer | string, type: "stdout" | "stderr"): void {
-		const lines = data.toString().split(/\r?\n/);
+		const outputAsString = data.toString();
+		if (this.verbose) {
+			if (type === "stdout") {
+				process.stdout.write(outputAsString);
+			} else {
+				process.stderr.write(outputAsString);
+			}
+		}
+
+		const lines = outputAsString.split(/\r?\n/);
 		const timestamp = Date.now();
 		for (let i = 0; i < lines.length; i++) {
 			if (i === lines.length - 1 && lines[i] === "") continue;

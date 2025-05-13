@@ -53,6 +53,10 @@ async function spawnChopup(
 		// Pass the specific socket path along with other args
 		// Options for 'run' must come BEFORE '--' and the command to wrap
 		let finalArgs: string[];
+
+		// Default to adding --verbose for tests that might expect echoed child output
+		const baseChopupArgs = ["--verbose", "--log-dir", logDir, "--socket-path", instanceSocketPath];
+
 		if (args[0] === "run") {
 			const runCmd = args[0];
 			const separatorIndex = args.indexOf("--");
@@ -60,38 +64,30 @@ async function spawnChopup(
 				const commandToWrap = args.slice(separatorIndex); // Includes '--'
 				const runArgsOnly = args.slice(1, separatorIndex);
 				finalArgs = [
+					...baseChopupArgs,
 					runCmd,
 					...runArgsOnly,
-					"--log-dir",
-					logDir,
-					"--socket-path",
-					instanceSocketPath,
 					...commandToWrap,
 				];
 			} else {
 				// case: chopup run actual_cmd (no --)
 				finalArgs = [
+					...baseChopupArgs,
 					runCmd,
-					"--log-dir",
-					logDir,
-					"--socket-path",
-					instanceSocketPath,
 					"--",
 					...args.slice(1),
 				];
 			}
+		} else if (args[0] === "request-logs" || args[0] === "send-input") {
+			// Client commands: --socket is a command-specific option, not global to chopup binary
+			// So baseChopupArgs (with global --socket-path for server) aren't prepended here.
+			// However, if these client commands somehow need to be verbose themselves (unlikely for their own output), this would need adjustment.
+			finalArgs = [...args]; // Pass args as is, they include their own --socket
 		} else {
-			// Passthrough case or direct command like request-logs (which takes --socket directly)
-			// For request-logs, its own options handling will pick up --socket, so just pass through.
-			// This block assumes if args[0] is not 'run', then it's a passthrough or a different command.
-			// If it were a global option for chopup itself, it would be program.opts().
-			// This logic might need refinement if global options are intended to be mixed with command arguments here.
+			// Passthrough case or other direct command. Assume global options apply.
 			finalArgs = [
-				...args,
-				"--log-dir",
-				logDir,
-				"--socket-path",
-				instanceSocketPath,
+				...baseChopupArgs,
+				...args, // This might be for the default action if no command is given
 			];
 		}
 
@@ -103,8 +99,8 @@ async function spawnChopup(
 			stdio: ["pipe", "pipe", "pipe"],
 			env: {
 				...process.env,
-				CHOPUP_CLI_VERBOSE: "true",
-				CHOPUP_TEST_MODE: "true",
+				// CHOPUP_CLI_VERBOSE: "true", // Old, not used by src/index.ts's log() anymore
+				CHOPUP_TEST_MODE: "true",   // Prevents instruction printing from Chopup class
 			},
 		});
 
@@ -444,67 +440,67 @@ describe("Chopup CLI Integration Tests", () => {
 
 	// Comment out other tests to run them one at a time
 	/*
-    describe('send-input CLI command', () => {
-        it('should send input to the wrapped process via CLI', async () => {
-            const targetScript = path.join(SCRIPTS_DIR, 'stdin-echo.js');
+	describe('send-input CLI command', () => {
+		it('should send input to the wrapped process via CLI', async () => {
+			const targetScript = path.join(SCRIPTS_DIR, 'stdin-echo.js');
 
-            // Run each test with a separate chopup instance
-            const instance = await spawnChopup(['run', '--', 'node', targetScript]);
-            runningInstances.push(instance);
-            
-            const testInput = "hello from integration test";
+			// Run each test with a separate chopup instance
+			const instance = await spawnChopup(['run', '--', 'node', targetScript]);
+			runningInstances.push(instance);
+		    
+			const testInput = "hello from integration test";
 
-            const sockPath = instance.socketPath;
-            if (!sockPath) throw new Error("Socket path not found for send-input test");
-            
-            try {
-                // Wait for the socket file to exist before executing client command
-                await waitForSocket(sockPath, 5000); // Increased timeout to 5 seconds
-                
-                console.log(`[TEST INFO] Verified socket exists: ${sockPath}`);
-                
-                // Add a retry mechanism for the execSync call
-                let retries = 3;
-                let success = false;
-                let lastError;
-                
-                while (retries > 0 && !success) {
-                    try {
-                        // Verify the socket exists before each attempt
-                        if (!fsSync.existsSync(sockPath)) {
-                            console.log(`[TEST WARNING] Socket file disappeared: ${sockPath}`);
-                            throw new Error(`Socket file disappeared: ${sockPath}`);
-                        }
-                        
-                        // Run client command directly on socket path
-                        console.log(`[TEST INFO] Running send-input command on socket: ${sockPath}`);
-                        execSync(`node ${CHOPUP_DIST_PATH} send-input --socket ${sockPath} --input "${testInput}"`);
-                        success = true;
-                    } catch (err) {
-                        console.log(`[TEST RETRY] Send-input failed, retrying... (${retries} left)`);
-                        lastError = err;
-                        retries--;
-                        await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
-                    }
-                }
-                
-                if (!success) {
-                    throw lastError;
-                }
+			const sockPath = instance.socketPath;
+			if (!sockPath) throw new Error("Socket path not found for send-input test");
+		    
+			try {
+				// Wait for the socket file to exist before executing client command
+				await waitForSocket(sockPath, 5000); // Increased timeout to 5 seconds
+			    
+				console.log(`[TEST INFO] Verified socket exists: ${sockPath}`);
+			    
+				// Add a retry mechanism for the execSync call
+				let retries = 3;
+				let success = false;
+				let lastError;
+			    
+				while (retries > 0 && !success) {
+					try {
+						// Verify the socket exists before each attempt
+						if (!fsSync.existsSync(sockPath)) {
+							console.log(`[TEST WARNING] Socket file disappeared: ${sockPath}`);
+							throw new Error(`Socket file disappeared: ${sockPath}`);
+						}
+					    
+						// Run client command directly on socket path
+						console.log(`[TEST INFO] Running send-input command on socket: ${sockPath}`);
+						execSync(`node ${CHOPUP_DIST_PATH} send-input --socket ${sockPath} --input "${testInput}"`);
+						success = true;
+					} catch (err) {
+						console.log(`[TEST RETRY] Send-input failed, retrying... (${retries} left)`);
+						lastError = err;
+						retries--;
+						await new Promise(resolve => setTimeout(resolve, 500)); // Wait before retry
+					}
+				}
+			    
+				if (!success) {
+					throw lastError;
+				}
 
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Give time for input to be processed and echoed
+				await new Promise(resolve => setTimeout(resolve, 1000)); // Give time for input to be processed and echoed
 
-                const stdoutCombined = instance.stdout.join('');
-                expect(stdoutCombined).toContain(`ECHOED: ${testInput}`);
-            } finally {
-                // Ensure we clean up the instance at the end of the test
-                await instance.kill();
-                const instanceIndex = runningInstances.indexOf(instance);
-                if (instanceIndex >= 0) {
-                    runningInstances.splice(instanceIndex, 1);
-                }
-            }
-        }, 15000);
-    });
-    */
+				const stdoutCombined = instance.stdout.join('');
+				expect(stdoutCombined).toContain(`ECHOED: ${testInput}`);
+			} finally {
+				// Ensure we clean up the instance at the end of the test
+				await instance.kill();
+				const instanceIndex = runningInstances.indexOf(instance);
+				if (instanceIndex >= 0) {
+					runningInstances.splice(instanceIndex, 1);
+				}
+			}
+		}, 15000);
+	});
+	*/
 });
