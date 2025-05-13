@@ -1,3 +1,11 @@
+## [1.1.0](https://github.com/johnlindquist/chopup/compare/v1.0.1...v1.1.0) (2025-05-13)
+
+### Features
+
+* add instruction message template and integrate into Chopup class; enhance command execution feedback and improve test coverage for instruction display ([741f7b5](https://github.com/johnlindquist/chopup/commit/741f7b59365b3a3159628bb8d55130823a0e99f1))
+* enhance output handling in Chopup class with verbose logging; update integration tests to include default verbose flag for improved output visibility ([a2fe5ab](https://github.com/johnlindquist/chopup/commit/a2fe5ab177cbb89ad45ff4bca1bdacdddf1c6d9e))
+* implement debug logging functionality in Chopup class; replace console.log with debugLog method for improved log management and clarity ([b7d81d1](https://github.com/johnlindquist/chopup/commit/b7d81d16fbc68f31ba1a42b866991d50b57ff89d))
+
 ## [1.0.1](https://github.com/johnlindquist/chopup/compare/v1.0.0...v1.0.1) (2025-05-13)
 
 ### Bug Fixes
