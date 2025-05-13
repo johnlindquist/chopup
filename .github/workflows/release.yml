@@ -65,8 +65,8 @@ jobs:
 
       - name: Output Publish Status (Published)
         if: steps.semantic.outputs.new_release_published == 'true'
-        run: echo "✅ New version ${{ steps.semantic.outputs.new_release_version }} tagged, released on GitHub, and published to npm."
+        run: echo "✅ New version ${{ steps.semantic.outputs.new_release_version }} tagged, released on GitHub, and published to npm by semantic-release."
 
       - name: Output Publish Status (Not Published)
         if: steps.semantic.outputs.new_release_published != 'true'
-        run: echo "ℹ️ No new version published."
+        run: echo "ℹ️ No new version published by semantic-release."
