@@ -57,12 +57,6 @@ jobs:
         if: steps.semantic.outputs.new_release_published == 'true'
         run: pnpm run build
 
-      - name: Publish to NPM
-        if: steps.semantic.outputs.new_release_published == 'true'
-        run: pnpm publish --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Output Publish Status (Published)
         if: steps.semantic.outputs.new_release_published == 'true'
         run: echo "✅ New version ${{ steps.semantic.outputs.new_release_version }} tagged, released on GitHub, and published to npm by semantic-release."
