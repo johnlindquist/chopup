@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 let count = 0;
+const prefix = process.argv[2] ? `${process.argv[2]} ` : ""; // Get prefix from arg
+
 const interval = setInterval(() => {
 	const timestamp = new Date().toISOString();
-	console.log(`${timestamp} - Line ${count}`);
+	console.log(`${prefix}${timestamp} - Line ${count}`); // Use prefix
 	count++;
 	if (count > 100) {
 		// Stop after a while to prevent infinite loops in tests
@@ -24,4 +26,4 @@ process.on("SIGINT", () => {
 });
 
 // Log startup for debugging
-console.log(`continuous-output.js started with PID ${process.pid}`);
+console.log(`${prefix}continuous-output.js started with PID ${process.pid}`); // Use prefix

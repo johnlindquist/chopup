@@ -16,6 +16,8 @@ import {
 	INPUT_SEND_ERROR_BACKPRESSURE,
 	INPUT_SEND_ERROR_NO_CHILD,
 	INPUT_SENT,
+	LOGS_CHOPPED,
+	LOGS_CHOPPED_PATH_PREFIX,
 } from "./chopup";
 
 let effectiveArgv = process.argv;
@@ -160,6 +162,7 @@ async function mainAction(
 ) {
 	const commandName = this.name();
 	let combinedOptions: Record<string, unknown>;
+
 	if (this.parent) {
 		combinedOptions = { ...this.parent.opts(), ...optionsFromAction };
 	} else {
@@ -183,6 +186,7 @@ async function mainAction(
 		send: sendOption,
 		socket: clientSocketOption,
 		input: clientInputOption,
+		pipe: pipeOption,
 	} = combinedOptions;
 
 	const defaultLogDir =
@@ -249,6 +253,8 @@ async function mainAction(
 			logDir: logDir,
 			socketPath: socketPathOption as string,
 			verbose: combinedOptions.verbose as boolean,
+			initialChop: combinedOptions.initialChop as boolean,
+			send: combinedOptions.send as string,
 		});
 
 		// Log the actual socket path used
@@ -302,11 +308,26 @@ async function mainAction(
 			log(combinedOptions.verbose as boolean, "Client: Connected for request-logs.");
 			client.write(JSON.stringify({ command: "request-logs" }));
 		});
-		client.on("data", (data) => {
+		client.on("data", async (data) => {
 			const res = data.toString();
 			log(combinedOptions.verbose as boolean, `Client: Response for request - logs: ${res}`);
-			if (res === "LOGS_CHOPPED") console.log("LOGS_CHOPPED");
-			else logWarn("Unexpected response.");
+
+			if (res.startsWith(LOGS_CHOPPED_PATH_PREFIX)) {
+				const filePath = res.substring(LOGS_CHOPPED_PATH_PREFIX.length);
+				console.log(`Logs chopped to: ${filePath}`);
+				if (pipeOption) {
+					try {
+						const content = await fs.readFile(filePath, "utf-8");
+						process.stdout.write(content);
+					} catch (err) {
+						logError(`Error reading log file for piping: ${(err as Error).message}`);
+					}
+				}
+			} else if (res === LOGS_CHOPPED) {
+				console.log("LOGS_CHOPPED (no new file path specified, likely empty buffer)");
+			} else {
+				logWarn("Unexpected response.");
+			}
 			clearTimeout(clientTimeout);
 			client.end(() => process.exit(0));
 		});
@@ -444,12 +465,14 @@ program
 		false,
 	)
 	.argument("[command...]", "The command to wrap and execute")
-	.action(async (command) => {
+	.action(async (commandArgsArray) => {
+		const commandToRun = commandArgsArray;
+		const verbose = program.opts().verbose as boolean;
 		const chopupInstance = new Chopup(
-			command, // Command array
+			commandToRun,
 			{
-				command,
-				verbose: program.opts().verbose,
+				command: commandToRun,
+				verbose,
 				socketPath: program.opts().socketPath,
 				logDir: program.opts().logDir,
 				initialChop: program.opts().initialChop,
@@ -478,7 +501,8 @@ program
 	.command("request-logs")
 	.description("Request the running Chopup instance to chop logs.")
 	.requiredOption("--socket <path>", "IPC socket path of the Chopup instance.")
-	.action(async function (this: CommanderCommand, options: { socket: string }) {
+	.option("--pipe", "Pipe the chopped log content to stdout.")
+	.action(async function (this: CommanderCommand, options: { socket: string; pipe?: boolean }) {
 		const globalOpts = this.parent?.opts() || {};
 		await mainAction.call(this, [], { ...globalOpts, ...options });
 	});

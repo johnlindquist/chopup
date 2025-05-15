@@ -44,6 +44,7 @@ export const INPUT_SEND_ERROR_BACKPRESSURE =
 	"CHOPUP_INPUT_SEND_ERROR_BACKPRESSURE";
 
 export const LOGS_CHOPPED = "LOGS_CHOPPED";
+export const LOGS_CHOPPED_PATH_PREFIX = "LOGS_CHOPPED_PATH:"; // New prefix
 export const REQUEST_LOGS_COMMAND = "request-logs";
 export const SEND_INPUT_COMMAND = "send-input";
 
@@ -85,9 +86,9 @@ export class Chopup {
 		if (this.verbose) {
 			const fullMessage = `[DEBUG ${new Date().toISOString()}] ${message}`;
 			if (optionalParams.length > 0) {
-				console.log(fullMessage, ...optionalParams);
+				console.error(fullMessage, ...optionalParams);
 			} else {
-				console.log(fullMessage);
+				console.error(fullMessage);
 			}
 		}
 	}
@@ -248,21 +249,29 @@ export class Chopup {
 					);
 
 					switch (commandData.command) {
-						case REQUEST_LOGS_COMMAND:
+						case REQUEST_LOGS_COMMAND: {
 							this.debugLog(
 								`[IPC_HANDLER] Received ${REQUEST_LOGS_COMMAND}. Calling chopLog...`,
 							);
-							await this.chopLog(); // Assuming chopLog might be async now or in future
-							await this.writeToSocket(socket, LOGS_CHOPPED); // Await write
+							const logFilePath = await this.chopLog();
+							this.debugLog(`[IPC_HANDLER] chopLog returned: ${logFilePath}`);
+							if (logFilePath) {
+								this.debugLog(`[IPC_HANDLER_SUCCESS] Got filename: "${logFilePath}", sending with prefix.`);
+								await this.writeToSocket(socket, `${LOGS_CHOPPED_PATH_PREFIX}${logFilePath}`);
+							} else {
+								this.debugLog(`[IPC_HANDLER_FAILURE] logFilePath is falsy (value: "${logFilePath}"), sending plain LOGS_CHOPPED.`);
+								await this.writeToSocket(socket, LOGS_CHOPPED);
+							}
 							break;
-
-						case SEND_INPUT_COMMAND:
+						}
+						case SEND_INPUT_COMMAND: {
 							this.debugLog(
 								`[IPC_HANDLER] Received ${SEND_INPUT_COMMAND}.`,
 							);
+							const inputToSend = commandData.input;
 							if (this.childProcess?.stdin) {
 								const writeSuccess = this.childProcess.stdin.write(
-									`${commandData.input}\n`, // Corrected: Use single backslash for newline
+									`${inputToSend}\n`,
 									(err) => {
 										if (err) {
 											this.logToConsole(
@@ -307,13 +316,15 @@ export class Chopup {
 								await this.writeToSocket(socket, INPUT_SEND_ERROR_NO_CHILD); // Await write
 							}
 							break;
-
-						default:
+						}
+						default: {
 							this.logToConsole(
 								`[WARN_IPC_HANDLER] Received unknown command: ${commandData.command}\n`,
 								"stderr",
 							);
 							await this.writeToSocket(socket, "UNKNOWN_COMMAND"); // Await write
+							break;
+						}
 					}
 				} catch (e: unknown) {
 					const parseError = e as Error;
@@ -439,7 +450,7 @@ export class Chopup {
 	}
 
 	// Make chopLog async to allow awaiting file write
-	public async chopLog(isFinalChop = false): Promise<void> {
+	public async chopLog(isFinalChop = false): Promise<string | undefined> {
 		this.debugLog(
 			"[CHOPLOG_INVOKED] chopLog called. isFinalChop:",
 			isFinalChop,
@@ -469,7 +480,8 @@ export class Chopup {
 			this.debugLog(
 				"Skipping log chop: No logs, not final chop, and not in test mode.",
 			);
-			return; // Return resolved promise for skipped write
+			this.debugLog("[CHOPLOG_RETURN] Returning undefined (no attempt to write).");
+			return undefined; // Return undefined if no file is written
 		}
 
 		const commandForFile = sanitizeForFolder(this.command.join(" "));
@@ -503,7 +515,8 @@ export class Chopup {
 			this.debugLog(
 				"Skipping log chop: Content is empty and not in forced test mode.",
 			);
-			return; // Return resolved promise for skipped write
+			this.debugLog("[CHOPLOG_RETURN] Returning undefined (empty content).");
+			return undefined; // Return undefined if no file is written
 		}
 
 		this.log(`Chopping logs to ${filename}. Lines: ${logsToWrite.length}`);
@@ -520,14 +533,16 @@ export class Chopup {
 			.then(() => {
 				this.log(`Successfully wrote logs to ${filename}`);
 				this.debugLog(`[CHOPLOG] Successfully wrote logs to ${filename}`);
+				this.debugLog(`[CHOPLOG_RETURN] Returning filename: ${filename}`);
+				return filename; // Return filename on success
 			})
 			.catch((err) => {
 				this.error(`Error writing log file ${filename}: ${err}`);
 				this.debugLog(
 					`[CHOPLOG] Error writing log file ${filename}: ${err}`,
 				);
-				// Re-throw error so the await in the IPC handler catches it if needed
-				throw err;
+				this.debugLog("[CHOPLOG_RETURN] Re-throwing error from writeFile.");
+				throw err; // REVERTED: Re-throw error
 			});
 	}
 
@@ -561,7 +576,7 @@ export class Chopup {
 			`Performing final cleanup. Exit code: ${exitCode}, Signal: ${signal}`,
 		);
 
-		this.chopLog(true);
+		await this.chopLog(true);
 
 		this.log("Closing all active IPC connections...");
 		for (const socket of this.activeConnections) {
