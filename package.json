@@ -1,6 +1,6 @@
 {
   "name": "chopup",
-  "version": "1.1.2",
+  "version": "0.0.0-development",
   "description": "A tool to wrap long-running processes and chop their logs based on file changes.",
   "main": "dist/index.js",
   "bin": {
